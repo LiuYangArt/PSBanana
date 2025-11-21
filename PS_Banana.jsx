@@ -138,6 +138,7 @@ if (typeof JSON !== 'object') {
 // ============================================================================
 var SETTINGS_FILE_NAME = "PS_AI_Plugin_Settings.json";
 var PRESETS_FILE_NAME = "PS_AI_Plugin_Presets.json";
+var PROVIDERS_FILE_NAME = "PS_AI_Plugin_Providers.json";
 
 var defaultSettings = {
     provider: "Google Gemini",
@@ -152,6 +153,21 @@ var defaultSettings = {
 var defaultPresets = [
     { name: "Enhance Details", prompt: "Enhance the details of this image, make it high resolution, 8k, realistic texture." },
     { name: "Remove Background", prompt: "Remove the background, keep the subject only, white background." }
+];
+
+var defaultProviders = [
+    {
+        name: "Google Gemini",
+        apiKey: "",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        model: "gemini-2.5-flash-image"
+    },
+    {
+        name: "Yunwu Gemini",
+        apiKey: "",
+        baseUrl: "https://yunwu.zeabur.app/v1beta",
+        model: "gemini-3-pro-image-preview"
+    }
 ];
 
 // ============================================================================
@@ -191,6 +207,7 @@ function saveJsonFile(fileName, data) {
 function showDialog() {
     var settings = loadJsonFile(SETTINGS_FILE_NAME, defaultSettings);
     var presets = loadJsonFile(PRESETS_FILE_NAME, defaultPresets);
+    var providers = loadJsonFile(PROVIDERS_FILE_NAME, defaultProviders);
 
     var win = new Window("dialog", "Photoshop Banana");
     win.orientation = "column";
@@ -249,96 +266,165 @@ function showDialog() {
     var pnlLayers = tabGenerate.add("panel", undefined, "Layer Selection");
     pnlLayers.orientation = "column";
     pnlLayers.alignChildren = ["fill", "top"];
-    pnlLayers.preferredSize.height = 200;
+    pnlLayers.preferredSize.height = 300;
     pnlLayers.margins = 10;
 
-    // Source Layer
-    var grpSource = pnlLayers.add("group");
-    grpSource.orientation = "row";
-    grpSource.add("statictext", undefined, "Source Layer:");
-    var dropSource = grpSource.add("dropdownlist", undefined, []);
-    dropSource.preferredSize.width = 250;
+    // Current Selection Display
+    var grpSourceDisplay = pnlLayers.add("group");
+    grpSourceDisplay.orientation = "row";
+    grpSourceDisplay.add("statictext", undefined, "Source Layer:");
+    var txtSourceSelection = grpSourceDisplay.add("statictext", undefined, "None");
+    txtSourceSelection.preferredSize.width = 300;
 
-    // Reference Layers
-    pnlLayers.add("statictext", undefined, "Reference Layers (Ctrl/Cmd+Click to select multiple):");
-    var listRef = pnlLayers.add("listbox", undefined, [], { multiselect: true });
-    listRef.preferredSize.height = 100;
-    listRef.preferredSize.width = 380;
+    var grpRefDisplay = pnlLayers.add("group");
+    grpRefDisplay.orientation = "row";
+    grpRefDisplay.add("statictext", undefined, "Reference Layers:");
+    var txtRefSelection = grpRefDisplay.add("statictext", undefined, "None");
+    txtRefSelection.preferredSize.width = 300;
 
-    var btnRefresh = pnlLayers.add("button", undefined, "Refresh Layers");
+    // Layer List
+    var listLayers = pnlLayers.add("listbox", undefined, [], { multiselect: true });
+    listLayers.preferredSize.height = 150;
+    listLayers.preferredSize.width = 400;
+
+    // Action Buttons
+    var grpLayerActions = pnlLayers.add("group");
+    grpLayerActions.orientation = "row";
+    var btnRefresh = grpLayerActions.add("button", undefined, "Refresh Layers");
+    var btnSetSource = grpLayerActions.add("button", undefined, "Set Source Layers");
+    var btnSetRef = grpLayerActions.add("button", undefined, "Set Ref Layers");
 
     // Layer Logic Variables
-    var allLayers = [];
+    var allLayers = []; // Flat list of layer objects corresponding to listbox items
+    var selectedSourceLayers = [];
+    var selectedRefLayers = [];
+
+    var updateSelectionLabels = function () {
+        if (selectedSourceLayers.length === 0) {
+            txtSourceSelection.text = "None";
+        } else {
+            var names = [];
+            for (var i = 0; i < selectedSourceLayers.length; i++) names.push(selectedSourceLayers[i].name);
+            txtSourceSelection.text = names.join(", ");
+        }
+
+        if (selectedRefLayers.length === 0) {
+            txtRefSelection.text = "None";
+        } else {
+            var names = [];
+            for (var i = 0; i < selectedRefLayers.length; i++) names.push(selectedRefLayers[i].name);
+            txtRefSelection.text = names.join(", ");
+        }
+    };
 
     var loadLayers = function () {
         if (!app.documents.length) return;
         var doc = app.activeDocument;
 
-        // Flatten layer list for dropdowns
         allLayers = [];
-        traverseLayers(doc, function (layer) {
-            allLayers.push(layer);
-        });
+        listLayers.removeAll();
+        selectedSourceLayers = [];
+        selectedRefLayers = [];
 
-        // Populate Source Dropdown
-        dropSource.removeAll();
-        listRef.removeAll();
+        // Recursive function to flatten layers and handle groups
+        var scanLayers = function (parent, pathPrefix) {
+            for (var i = 0; i < parent.layers.length; i++) {
+                var layer = parent.layers[i];
+                var currentName = pathPrefix + layer.name;
 
-        var sourceIndex = -1;
-        var refIndices = [];
-        var activeLayer = doc.activeLayer;
+                // Check for Group Auto-detection
+                if (layer.typename == "LayerSet") {
+                    var lowerName = layer.name.toLowerCase();
+                    if (lowerName === "source") {
+                        // Add all children to source
+                        var children = expandLayerSet(layer);
+                        for (var j = 0; j < children.length; j++) selectedSourceLayers.push(children[j]);
+                    } else if (lowerName === "reference") {
+                        // Add all children to ref
+                        var children = expandLayerSet(layer);
+                        for (var k = 0; k < children.length; k++) selectedRefLayers.push(children[k]);
+                    }
 
-        for (var i = 0; i < allLayers.length; i++) {
-            var layer = allLayers[i];
-            var name = layer.name;
-
-            dropSource.add("item", name);
-            listRef.add("item", name);
-
-            // Auto-select logic
-            var lowerName = name.toLowerCase();
-
-            // Source: Priority to "source", then active layer
-            if (lowerName.indexOf("source") !== -1) {
-                if (sourceIndex === -1 || allLayers[sourceIndex].name.toLowerCase().indexOf("source") === -1) {
-                    sourceIndex = i;
+                    // Recurse
+                    scanLayers(layer, currentName + " | ");
+                } else {
+                    // It's a layer, add to list
+                    allLayers.push(layer);
+                    listLayers.add("item", currentName);
                 }
             }
+        };
 
-            // Ref: Priority to "reference"
-            if (lowerName.indexOf("reference") !== -1) {
-                refIndices.push(i);
-            }
-        }
+        scanLayers(doc, "");
 
-        // Fallback for Source: Active Layer
-        if (sourceIndex === -1 && activeLayer) {
-            for (var j = 0; j < allLayers.length; j++) {
-                if (allLayers[j] == activeLayer) {
-                    sourceIndex = j;
-                    break;
+        // Fallback: If no group detected, try to find by name in flattened list
+        if (selectedSourceLayers.length === 0) {
+            for (var i = 0; i < allLayers.length; i++) {
+                if (allLayers[i].name.toLowerCase().indexOf("source") !== -1) {
+                    selectedSourceLayers.push(allLayers[i]);
+                    // Only take the first one found as primary source if not group? 
+                    // Or all? Let's stick to "all layers named source" if no group found?
+                    // Original logic was "last selected" or "priority". 
+                    // Let's just pick the first one found for now to be safe, or all.
+                    // User said: "No corresponding group... search by name".
+                    // Let's add all matching "source" keyword.
                 }
             }
         }
-        if (sourceIndex === -1 && allLayers.length > 0) sourceIndex = 0;
-
-        // Set Selections
-        if (sourceIndex !== -1) dropSource.selection = sourceIndex;
-
-        for (var k = 0; k < refIndices.length; k++) {
-            listRef.items[refIndices[k]].selected = true;
+        // If still empty, maybe active layer?
+        if (selectedSourceLayers.length === 0 && doc.activeLayer) {
+            // Check if active layer is in our list (it might be a group, which we don't list directly)
+            // If active layer is a LayerSet, we should probably expand it?
+            // For simplicity, let's just leave it empty and let user select.
+            // Or default to first layer.
+            if (allLayers.length > 0) {
+                // selectedSourceLayers.push(allLayers[0]); 
+            }
         }
+
+        if (selectedRefLayers.length === 0) {
+            for (var i = 0; i < allLayers.length; i++) {
+                if (allLayers[i].name.toLowerCase().indexOf("reference") !== -1) {
+                    selectedRefLayers.push(allLayers[i]);
+                }
+            }
+        }
+
+        updateSelectionLabels();
     };
 
     var updateUI = function () {
         var isLayer = radLayer.value;
         pnlLayers.enabled = isLayer;
-        pnlLayers.visible = isLayer; // Hide if not active to save space? Or just disable.
-        // Layout fix if visibility changes
-        // win.layout.layout(true); 
+        pnlLayers.visible = isLayer;
     };
 
     btnRefresh.onClick = loadLayers;
+
+    btnSetSource.onClick = function () {
+        var sel = listLayers.selection;
+        if (!sel) return;
+        selectedSourceLayers = [];
+        if (sel instanceof Array) {
+            for (var i = 0; i < sel.length; i++) selectedSourceLayers.push(allLayers[sel[i].index]);
+        } else {
+            selectedSourceLayers.push(allLayers[sel.index]);
+        }
+        updateSelectionLabels();
+    };
+
+    btnSetRef.onClick = function () {
+        var sel = listLayers.selection;
+        if (!sel) return;
+        selectedRefLayers = [];
+        if (sel instanceof Array) {
+            for (var i = 0; i < sel.length; i++) selectedRefLayers.push(allLayers[sel[i].index]);
+        } else {
+            selectedRefLayers.push(allLayers[sel.index]);
+        }
+        updateSelectionLabels();
+    };
+
     radLayer.onClick = updateUI;
     radFile.onClick = updateUI;
 
@@ -357,12 +443,35 @@ function showDialog() {
     var grpProvider = tabSettings.add("group");
     grpProvider.orientation = "row";
     grpProvider.add("statictext", undefined, "Provider:");
-    var dropProvider = grpProvider.add("dropdownlist", undefined, ["Google Gemini", "OpenRouter", "Yunwu Gemini", "Custom"]);
-    dropProvider.selection = 0; // Default
-    // Set selection based on settings
-    if (settings.provider === "Google Gemini") dropProvider.selection = 0;
-    else if (settings.provider === "OpenRouter") dropProvider.selection = 1;
-    else dropProvider.selection = 2;
+    var dropProvider = grpProvider.add("dropdownlist", undefined, []);
+    dropProvider.preferredSize.width = 200;
+
+    var btnAddProvider = grpProvider.add("button", undefined, "+");
+    btnAddProvider.preferredSize.width = 30;
+    var btnSaveProvider = grpProvider.add("button", undefined, "Save");
+    btnSaveProvider.preferredSize.width = 50;
+    var btnDeleteProvider = grpProvider.add("button", undefined, "Del");
+    btnDeleteProvider.preferredSize.width = 40;
+
+    // Populate Providers
+    var populateProviders = function () {
+        dropProvider.removeAll();
+        for (var i = 0; i < providers.length; i++) {
+            dropProvider.add("item", providers[i].name);
+        }
+        // Select active provider
+        var selectedIndex = 0;
+        for (var j = 0; j < providers.length; j++) {
+            if (providers[j].name === settings.provider) {
+                selectedIndex = j;
+                break;
+            }
+        }
+        if (dropProvider.items.length > 0) {
+            dropProvider.selection = selectedIndex;
+        }
+    };
+    populateProviders();
 
     // API Key
     var grpKey = tabSettings.add("group");
@@ -454,18 +563,84 @@ function showDialog() {
 
     // Settings Logic
     dropProvider.onChange = function () {
-        var p = dropProvider.selection.text;
-        if (p === "Google Gemini") {
-            txtBaseUrl.text = "https://generativelanguage.googleapis.com/v1beta";
-            txtModel.text = "gemini-2.5-flash-image";
-        } else if (p === "OpenRouter") {
-            txtBaseUrl.text = "https://openrouter.ai/api/v1";
-            txtModel.text = "google/gemini-pro-vision";
-        } else if (p === "Custom") {
-            txtBaseUrl.text = "https://yunwu.zeabur.app/v1beta";
-            txtModel.text = "gemini-3-pro-image-preview";
-            if (txtApiKey.text === "") txtApiKey.text = "sk-";
+        if (!dropProvider.selection) return;
+        var selectedName = dropProvider.selection.text;
+
+        // Find provider config
+        var providerConfig = null;
+        for (var i = 0; i < providers.length; i++) {
+            if (providers[i].name === selectedName) {
+                providerConfig = providers[i];
+                break;
+            }
         }
+
+        if (providerConfig) {
+            txtApiKey.text = providerConfig.apiKey;
+            txtBaseUrl.text = providerConfig.baseUrl;
+            txtModel.text = providerConfig.model;
+        }
+    };
+
+    btnAddProvider.onClick = function () {
+        var name = prompt("Enter new provider name:", "New Provider");
+        if (name) {
+            // Check if exists
+            for (var i = 0; i < providers.length; i++) {
+                if (providers[i].name === name) {
+                    alert("Provider name already exists!");
+                    return;
+                }
+            }
+
+            var newProvider = {
+                name: name,
+                apiKey: "",
+                baseUrl: "",
+                model: ""
+            };
+            providers.push(newProvider);
+            saveJsonFile(PROVIDERS_FILE_NAME, providers);
+
+            dropProvider.add("item", name);
+            dropProvider.selection = dropProvider.items.length - 1;
+            // Trigger change to clear fields for new provider? Or keep previous?
+            // Let's clear them or set to empty
+            txtApiKey.text = "";
+            txtBaseUrl.text = "";
+            txtModel.text = "";
+        }
+    };
+
+    btnSaveProvider.onClick = function () {
+        if (!dropProvider.selection) return;
+        var idx = dropProvider.selection.index;
+
+        // Update the provider object with current text fields
+        providers[idx].apiKey = txtApiKey.text;
+        providers[idx].baseUrl = txtBaseUrl.text;
+        providers[idx].model = txtModel.text;
+
+        saveJsonFile(PROVIDERS_FILE_NAME, providers);
+        alert("Provider configuration saved!");
+    };
+
+    btnDeleteProvider.onClick = function () {
+        if (!dropProvider.selection) return;
+        if (providers.length <= 1) {
+            alert("Cannot delete the last provider.");
+            return;
+        }
+
+        var confirm = Window.confirm("Are you sure you want to delete this provider?");
+        if (!confirm) return;
+
+        var idx = dropProvider.selection.index;
+        providers.splice(idx, 1);
+        saveJsonFile(PROVIDERS_FILE_NAME, providers);
+
+        dropProvider.remove(idx);
+        dropProvider.selection = 0;
     };
 
     btnTest.onClick = function () {
@@ -516,8 +691,6 @@ function showDialog() {
         settings.provider = dropProvider.selection.text;
         settings.apiKey = txtApiKey.text;
         settings.baseUrl = txtBaseUrl.text;
-        settings.baseUrl = txtBaseUrl.text;
-        settings.model = txtModel.text;
         settings.model = txtModel.text;
         settings.debugMode = chkDebug.value;
         settings.useJpeg = chkJpeg.value;
@@ -526,27 +699,17 @@ function showDialog() {
         try {
             var generationOptions = {
                 mode: radFile.value ? "file" : "layer",
-                sourceLayer: null,
+                sourceLayers: [],
                 refLayers: []
             };
 
             if (generationOptions.mode === "layer") {
-                if (!dropSource.selection) {
-                    alert("Please select a Source Layer.");
+                if (selectedSourceLayers.length === 0) {
+                    alert("Please select at least one Source Layer.");
                     return;
                 }
-                generationOptions.sourceLayer = allLayers[dropSource.selection.index];
-
-                var selRef = listRef.selection;
-                if (selRef) {
-                    if (selRef instanceof Array) {
-                        for (var i = 0; i < selRef.length; i++) {
-                            generationOptions.refLayers.push(allLayers[selRef[i].index]);
-                        }
-                    } else {
-                        generationOptions.refLayers.push(allLayers[selRef.index]);
-                    }
-                }
+                generationOptions.sourceLayers = selectedSourceLayers;
+                generationOptions.refLayers = selectedRefLayers;
             }
 
             processGeneration(settings, txtPrompt.text, generationOptions);
@@ -592,20 +755,26 @@ function processGeneration(settings, promptText, options) {
         "Content-Type: application/json; charset=utf-8"
     ];
 
-    if (settings.provider === "Google Gemini") {
-        // Gemini API (generateContent)
-        apiUrl = settings.baseUrl + "/models/" + settings.model + ":generateContent?key=" + settings.apiKey;
+    if (settings.provider === "OpenRouter" || settings.baseUrl.indexOf("openrouter") !== -1) {
+        // OpenRouter / OpenAI Compatible
+        if (apiUrl.indexOf("/images/generations") === -1) {
+            if (apiUrl.slice(-1) !== "/") apiUrl += "/";
+            apiUrl += "images/generations";
+        }
+
+        headers.push("Authorization: Bearer " + settings.apiKey);
+        headers.push("HTTP-Referer: https://github.com/antigravity/ps-plugin");
+        headers.push("X-Title: Photoshop AI Plugin");
 
         payload = {
-            contents: [{
-                parts: [{
-                    text: promptText
-                }]
-            }]
+            prompt: promptText,
+            model: settings.model,
+            response_format: "b64_json",
+            n: 1
         };
-
-    } else if (settings.provider === "Yunwu Gemini") {
-        // Yunwu Gemini (Gemini 2.5 Flash Image)
+    } else {
+        // Gemini API (Default for Google Gemini, Yunwu Gemini, and Custom)
+        // Supports Images and Masks
         apiUrl = settings.baseUrl + "/models/" + settings.model + ":generateContent?key=" + settings.apiKey;
 
         var maskImageFile = new File(appDataFolder.fsName + "/ps_ai_mask" + ext);
@@ -622,20 +791,7 @@ function processGeneration(settings, promptText, options) {
 
         if (hasSelection(doc)) {
             createMaskLayer(doc);
-            // Mask is always black and white, PNG is usually better/safer for masks to avoid artifacts, 
-            // but if user wants speed, JPEG is fine too. However, masks rely on pure black/white.
-            // JPEG artifacts might introduce noise. Let's stick to PNG for MASK if possible, 
-            // OR ensure high quality JPEG. 
-            // Actually, for the API, it just needs an image.
-            // Let's use the user preference for consistency, but maybe force PNG for mask if issues arise.
-            // For now: Use settings.
             exportImage(doc, maskImageFile, settings);
-            // Wait, exportCurrentStateToPng exports the whole doc flattened. 
-            // In createMaskLayer, we fill selection. We need to ensure ONLY mask is visible?
-            // Actually createMaskLayer makes a new layer on top. 
-            // exportCurrentStateToPng duplicates and flattens. So it will see the mask layer on top.
-            // Correct.
-
             base64Mask = encodeFileToBase64(maskImageFile);
 
             // Revert to original state (removes mask layer, restores selection)
@@ -649,11 +805,13 @@ function processGeneration(settings, promptText, options) {
         if (options && options.mode === "layer") {
             // --- Layer Mode ---
 
-            // Export Source Layer
-            exportLayers(doc, [options.sourceLayer], sourceImageFile, settings);
-            if (sourceImageFile.exists) {
-                base64Source = encodeFileToBase64(sourceImageFile);
-                if (!settings.debugMode) sourceImageFile.remove();
+            // Export Source Layers (Merged)
+            if (options.sourceLayers.length > 0) {
+                exportLayers(doc, options.sourceLayers, sourceImageFile, settings);
+                if (sourceImageFile.exists) {
+                    base64Source = encodeFileToBase64(sourceImageFile);
+                    if (!settings.debugMode) sourceImageFile.remove();
+                }
             }
 
             // Export Reference Layers
@@ -668,7 +826,9 @@ function processGeneration(settings, promptText, options) {
             // Debug Alert for Layer Mode
             if (settings.debugMode) {
                 var msg = "Debug Mode - Layer Export:\n";
-                msg += "Source: " + options.sourceLayer.name + "\nPath: " + sourceImageFile.fsName + "\n";
+                msg += "Source (" + options.sourceLayers.length + "):\nPath: " + sourceImageFile.fsName + "\n";
+                for (var i = 0; i < options.sourceLayers.length; i++) msg += "- " + options.sourceLayers[i].name + "\n";
+
                 if (options.refLayers.length > 0) {
                     msg += "References (" + options.refLayers.length + "):\nPath: " + refImageFile.fsName + "\n";
                     for (var i = 0; i < options.refLayers.length; i++) msg += "- " + options.refLayers[i].name + "\n";
@@ -729,24 +889,6 @@ function processGeneration(settings, promptText, options) {
                 responseModalities: ["image"]
             }
         };
-
-    } else {
-        // OpenRouter / OpenAI Compatible
-        if (apiUrl.indexOf("/images/generations") === -1) {
-            if (apiUrl.slice(-1) !== "/") apiUrl += "/";
-            apiUrl += "images/generations";
-        }
-
-        headers.push("Authorization: Bearer " + settings.apiKey);
-        headers.push("HTTP-Referer: https://github.com/antigravity/ps-plugin");
-        headers.push("X-Title: Photoshop AI Plugin");
-
-        payload = {
-            prompt: promptText,
-            model: settings.model,
-            response_format: "b64_json",
-            n: 1
-        };
     }
 
     // 3. Write Payload to File
@@ -797,9 +939,17 @@ function processGeneration(settings, promptText, options) {
     var responseText = responseFile.read();
     responseFile.close();
 
+    if (responseText === "") {
+        alert("API returned an empty response.");
+        return;
+    }
+
+    // alert("Response size: " + responseText.length);
+
     var response;
     try {
         response = JSON.parse(responseText);
+        // alert("JSON Parsed successfully.");
     } catch (e) {
         var shownText = responseText.length > 500 ? responseText.substring(0, 500) + "..." : responseText;
         alert("Failed to parse API response. The server returned:\n\n" + shownText);
@@ -809,69 +959,65 @@ function processGeneration(settings, promptText, options) {
     // 7. Extract Image Data (Base64)
     var b64Data = null;
 
-    if (settings.provider === "Google Gemini") {
-        // Structure: candidates[0].content.parts[].inlineData.data
-        if (response.candidates && response.candidates.length > 0) {
-            var parts = response.candidates[0].content.parts;
-            for (var i = 0; i < parts.length; i++) {
-                if (parts[i].inlineData && parts[i].inlineData.data) {
-                    b64Data = parts[i].inlineData.data;
-                    break;
-                }
+    // Try Gemini structure first (candidates)
+    if (response.candidates && response.candidates.length > 0) {
+        var parts = response.candidates[0].content.parts;
+        for (var i = 0; i < parts.length; i++) {
+            if (parts[i].inlineData && parts[i].inlineData.data) {
+                b64Data = parts[i].inlineData.data;
+                break;
             }
-        }
-
-        if (!b64Data) {
-            if (response.error) {
-                alert("Gemini API Error:\nCode: " + response.error.code + "\nMessage: " + response.error.message);
-            } else {
-                alert("Unexpected Gemini Response (No image found):\n" + JSON.stringify(response, null, 2));
-            }
-            return;
-        }
-    } else if (settings.provider === "Yunwu Gemini") {
-        // Structure: candidates[0].content.parts[].inlineData.data
-        // Same structure as Google Gemini for response
-        if (response.candidates && response.candidates.length > 0) {
-            var parts = response.candidates[0].content.parts;
-            for (var i = 0; i < parts.length; i++) {
-                if (parts[i].inlineData && parts[i].inlineData.data) {
-                    b64Data = parts[i].inlineData.data;
-                    break;
-                }
-            }
-        }
-
-        if (!b64Data) {
-            if (response.error) {
-                alert("Yunwu API Error:\nCode: " + response.error.code + "\nMessage: " + response.error.message);
-            } else {
-                alert("Unexpected Yunwu Response (No image found):\n" + JSON.stringify(response, null, 2));
-            }
-            return;
-        }
-    } else {
-        if (response.data && response.data.length > 0 && response.data[0].b64_json) {
-            b64Data = response.data[0].b64_json;
-        } else if (response.error) {
-            alert("API Error:\n" + response.error.message);
-            return;
-        } else {
-            alert("Unexpected Response:\n" + JSON.stringify(response, null, 2));
-            return;
         }
     }
 
+    // If not found, try OpenAI structure (data[0].b64_json)
+    if (!b64Data && response.data && response.data.length > 0 && response.data[0].b64_json) {
+        b64Data = response.data[0].b64_json;
+    }
+
+    if (!b64Data) {
+        if (response.error) {
+            alert("API Error:\nCode: " + (response.error.code || "Unknown") + "\nMessage: " + response.error.message);
+        } else {
+            alert("Unexpected Response (No image found):\n" + JSON.stringify(response, null, 2));
+        }
+        return;
+    }
+
+    // DEBUG: Check Base64 Data
+    alert("Base64 Data Extracted. Length: " + b64Data.length);
+
     // 8. Save Base64 to PNG
-    saveBase64ToPng(b64Data, resultImageFile);
+    // Use fixed filename for debugging
+    var debugResultFile = new File(appDataFolder.fsName + "/ps_ai_last_result.png");
+
+    try {
+        alert("Saving result image to: " + debugResultFile.fsName);
+        saveBase64ToPng(b64Data, debugResultFile);
+    } catch (e) {
+        alert("Failed to decode/save image: " + e.message);
+        return;
+    }
 
     // 9. Import to Photoshop
-    if (resultImageFile.exists) {
-        placeImage(doc, resultImageFile);
-        app.refresh(); // Force UI update
-        if (!settings.debugMode) resultImageFile.remove(); // Cleanup
+    if (debugResultFile.exists) {
+        if (debugResultFile.length > 0) {
+            try {
+                alert("Placing image... Size: " + debugResultFile.length);
+                placeImage(doc, debugResultFile);
+                app.refresh(); // Force UI update
+
+                // DISABLE CLEANUP FOR DEBUGGING
+                // if (!settings.debugMode) resultImageFile.remove(); 
+                alert("Image placed. Check for new layer. Debug file kept at: " + debugResultFile.fsName);
+            } catch (e) {
+                alert("Failed to place image into Photoshop: " + e.message);
+            }
+        } else {
+            alert("Result image file is empty (0 bytes). Decode failed?");
+        }
     } else {
-        alert("Failed to save result image.");
+        alert("Failed to save result image (File not found after decode).");
     }
 }
 
@@ -1042,108 +1188,88 @@ function createMaskLayer(doc) {
     // Invert and Fill with Black
     doc.selection.invert();
     doc.selection.fill(black);
-
     // Deselect to show full mask
     doc.selection.deselect();
 }
 
-// ============================================================================
-// Layer Export Helpers (from LayerTest.jsx)
-// ============================================================================
-
 function exportLayers(originalDoc, layersToKeep, file, settings) {
-    var dup = originalDoc.duplicate();
+    // New Method: Create Temp Doc -> Duplicate Layers into it -> Flatten -> Save
+    // This avoids "frontmost document" errors and history state issues.
 
-    // Resize if too large (max 4096px) to match exportCurrentStateToPng
-    var maxDim = 4096;
-    if (dup.width.as("px") > maxDim || dup.height.as("px") > maxDim) {
-        if (dup.width.as("px") > dup.height.as("px")) {
-            dup.resizeImage(UnitValue(maxDim, "px"), undefined, undefined, ResampleMethod.BICUBIC);
-        } else {
-            dup.resizeImage(undefined, UnitValue(maxDim, "px"), undefined, ResampleMethod.BICUBIC);
-        }
-    }
+    // DEBUG
+    // alert("Exporting " + layersToKeep.length + " layers.");
 
-    var keepNames = {};
-    for (var i = 0; i < layersToKeep.length; i++) {
-        keepNames[layersToKeep[i].name] = true;
-    }
+    var newDoc = app.documents.add(
+        originalDoc.width,
+        originalDoc.height,
+        originalDoc.resolution,
+        "PS_AI_Export_Temp",
+        NewDocumentMode.RGB,
+        DocumentFill.TRANSPARENT
+    );
 
-    // 1. Set Visibility
-    var visibleCount = recurseSetVisibility(dup, keepNames);
+    // FIX: Switch back to original doc so we can duplicate FROM it
+    app.activeDocument = originalDoc;
 
-    // 2. Merge or Save
-    if (visibleCount > 0) {
-        // Fix for "Merge Visible" error:
-        // Only merge if there is more than 1 visible layer.
-        if (visibleCount > 1) {
+    try {
+        // Duplicate layers into new doc
+        var successCount = 0;
+        for (var i = 0; i < layersToKeep.length; i++) {
+            var layer = layersToKeep[i];
             try {
-                dup.mergeVisibleLayers();
+                // duplicate(targetDocument, elementPlacement)
+                // Note: duplicate() might not work if target doc is not open, but it is open.
+                // It requires source doc to be active.
+                var dupLayer = layer.duplicate(newDoc, ElementPlacement.PLACEATEND);
+                dupLayer.visible = true; // Ensure visible
+                successCount++;
             } catch (e) {
-                // Ignore merge errors if they happen (e.g. weird layer states)
-                // The file will still save the visible state.
+                // alert("Failed to duplicate layer '" + layer.name + "': " + e.message);
             }
         }
 
-        saveImage(dup, file, settings);
-    } else {
-        // alert("Warning: No matching layers found to export for " + file.name);
-        // Create a blank/transparent image if nothing selected? Or just fail?
-        // For now, let's save whatever is there (likely empty/transparent)
-        saveImage(dup, file, settings);
-    }
+        // Switch to new doc to flatten and save
+        app.activeDocument = newDoc;
 
-    dup.close(SaveOptions.DONOTSAVECHANGES);
-}
-
-function recurseSetVisibility(parent, keepNames) {
-    var visibleCount = 0;
-    try {
-        for (var i = 0; i < parent.layers.length; i++) {
-            var layer = parent.layers[i];
-
-            if (keepNames[layer.name]) {
-                layer.visible = true;
-                visibleCount++;
-            } else {
-                if (layer.typename == "LayerSet") {
-                    if (containsKeepers(layer, keepNames)) {
-                        layer.visible = true;
-                        visibleCount += recurseSetVisibility(layer, keepNames);
-                    } else {
-                        layer.visible = false;
-                    }
-                } else {
-                    layer.visible = false;
-                }
-            }
+        // Flatten and Save
+        // If newDoc has no layers (empty selection), flatten might error or produce white.
+        if (newDoc.layers.length === 0) {
+            // Add a blank layer so flatten works
+            newDoc.artLayers.add();
         }
+
+        newDoc.flatten();
+        saveImage(newDoc, file, settings);
+
     } catch (e) {
-        // Ignore errors accessing layers
+        alert("Export Error: " + e.message);
+    } finally {
+        // Ensure newDoc is closed if it exists and is open
+        try {
+            if (newDoc) newDoc.close(SaveOptions.DONOTSAVECHANGES);
+        } catch (e) { }
+
+        // Restore focus to original doc
+        app.activeDocument = originalDoc;
     }
-    return visibleCount;
 }
 
-function containsKeepers(layer, keepNames) {
-    if (keepNames[layer.name]) return true;
-    if (layer.typename == "LayerSet") {
-        for (var i = 0; i < layer.layers.length; i++) {
-            if (containsKeepers(layer.layers[i], keepNames)) return true;
-        }
-    }
-    return false;
-}
-
-function traverseLayers(parent, callback) {
+function expandLayerSet(layerSet) {
+    var layers = [];
     try {
-        for (var i = 0; i < parent.layers.length; i++) {
-            var layer = parent.layers[i];
-            callback(layer);
+        for (var i = 0; i < layerSet.layers.length; i++) {
+            var layer = layerSet.layers[i];
             if (layer.typename == "LayerSet") {
-                traverseLayers(layer, callback);
+                var children = expandLayerSet(layer);
+                for (var j = 0; j < children.length; j++) {
+                    layers.push(children[j]);
+                }
+            } else {
+                layers.push(layer);
             }
         }
     } catch (e) { }
+    return layers;
 }
 
 function saveImage(doc, file, settings) {
