@@ -146,8 +146,9 @@ var defaultSettings = {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     model: "gemini-2.5-flash-image",
     debugMode: false,
-    useJpeg: false,
-    jpegQuality: 8
+    useJpeg: true,
+    jpegQuality: 8,
+    maxSize: 1024
 };
 
 var defaultPresets = [
@@ -229,7 +230,7 @@ function showDialog() {
     // Presets Group
     var grpPresets = tabGenerate.add("group");
     grpPresets.orientation = "row";
-    grpPresets.add("statictext", undefined, "Presets:");
+    grpPresets.add("statictext", undefined, "Prompt Presets:");
     var dropPresets = grpPresets.add("dropdownlist", undefined, []);
     dropPresets.preferredSize.width = 250;
 
@@ -509,6 +510,14 @@ function showDialog() {
     var txtQuality = grpQuality.add("edittext", undefined, settings.jpegQuality || 8);
     txtQuality.preferredSize.width = 50;
 
+    // Max Size
+    var grpSize = tabSettings.add("group");
+    grpSize.orientation = "row";
+    grpSize.add("statictext", undefined, "Max Size (px):");
+    var txtMaxSize = grpSize.add("edittext", undefined, settings.maxSize || 1024);
+    txtMaxSize.preferredSize.width = 60;
+    grpSize.add("statictext", undefined, "(Resizes long edge if larger)");
+
     // Toggle Quality input visibility based on Checkbox
     var updateQualityVisibility = function () {
         grpQuality.visible = chkJpeg.value;
@@ -672,6 +681,7 @@ function showDialog() {
         settings.debugMode = chkDebug.value;
         settings.useJpeg = chkJpeg.value;
         settings.jpegQuality = parseInt(txtQuality.text) || 8;
+        settings.maxSize = parseInt(txtMaxSize.text) || 1024;
         saveJsonFile(SETTINGS_FILE_NAME, settings);
         alert("Settings saved!");
     };
@@ -695,6 +705,7 @@ function showDialog() {
         settings.debugMode = chkDebug.value;
         settings.useJpeg = chkJpeg.value;
         settings.jpegQuality = parseInt(txtQuality.text) || 8;
+        settings.maxSize = parseInt(txtMaxSize.text) || 1024;
 
         try {
             var generationOptions = {
@@ -739,6 +750,19 @@ function processGeneration(settings, promptText, options) {
     // 1. Determine Output File Paths
     // Use getAppDataFolder() for consistency
     var appDataFolder = getAppDataFolder();
+
+    // Clean up old result files from previous generations
+    var oldResults = appDataFolder.getFiles("ps_ai_result_*.png");
+    if (oldResults) {
+        for (var i = 0; i < oldResults.length; i++) {
+            try {
+                oldResults[i].remove();
+            } catch (e) {
+                // Ignore errors if file is locked or doesn't exist
+            }
+        }
+    }
+
     var responseFile = new File(appDataFolder.fsName + "/ps_ai_response.json");
     var payloadFile = new File(appDataFolder.fsName + "/ps_ai_payload.json");
     var timestamp = new Date().getTime();
@@ -850,7 +874,7 @@ function processGeneration(settings, promptText, options) {
 
         // Add System Prompt for Selection if mask exists
         if (base64Mask) {
-            parts[0].text = "System Instruction: The first image provided is a black and white mask. White areas represent the selection where edits should be applied. Black areas should remain unchanged. | 提供的第一张图片是一个黑白蒙版。白色区域表示应应用编辑的选区。黑色区域应保持不变。\n\nUser Prompt: " + promptText;
+            parts[0].text = "System Instruction: The first image provided is a black and white selection mask. White areas represent the selection where edits should be applied. Black areas should remain unchanged. | 提供的第一张图片是一个黑白选区蒙版。白色区域表示应应用编辑的选区。黑色区域应保持不变。\n\nUser Prompt: " + promptText;
         }
 
         // Order: Mask -> Source -> Ref
@@ -985,31 +1009,35 @@ function processGeneration(settings, promptText, options) {
     }
 
     // DEBUG: Check Base64 Data
-    alert("Base64 Data Extracted. Length: " + b64Data.length);
+    if (settings.debugMode) {
+        alert("Base64 Data Extracted. Length: " + b64Data.length);
+    }
 
     // 8. Save Base64 to PNG
-    // Use fixed filename for debugging
-    var debugResultFile = new File(appDataFolder.fsName + "/ps_ai_last_result.png");
-
     try {
-        alert("Saving result image to: " + debugResultFile.fsName);
-        saveBase64ToPng(b64Data, debugResultFile);
+        if (settings.debugMode) {
+            alert("Saving result image to: " + resultImageFile.fsName);
+        }
+        saveBase64ToPng(b64Data, resultImageFile);
     } catch (e) {
         alert("Failed to decode/save image: " + e.message);
         return;
     }
 
     // 9. Import to Photoshop
-    if (debugResultFile.exists) {
-        if (debugResultFile.length > 0) {
+    if (resultImageFile.exists) {
+        if (resultImageFile.length > 0) {
             try {
-                alert("Placing image... Size: " + debugResultFile.length);
-                placeImage(doc, debugResultFile);
+                if (settings.debugMode) {
+                    alert("Placing image... Size: " + resultImageFile.length);
+                }
+                placeImage(doc, resultImageFile);
                 app.refresh(); // Force UI update
 
-                // DISABLE CLEANUP FOR DEBUGGING
-                // if (!settings.debugMode) resultImageFile.remove(); 
-                alert("Image placed. Check for new layer. Debug file kept at: " + debugResultFile.fsName);
+                // Keep the file for debugging - will be cleaned up on next generation
+                if (settings.debugMode) {
+                    alert("Image placed successfully. Result file kept at: " + resultImageFile.fsName);
+                }
             } catch (e) {
                 alert("Failed to place image into Photoshop: " + e.message);
             }
@@ -1248,6 +1276,18 @@ function createMaskLayer(doc) {
     doc.selection.deselect();
 }
 
+// Helper: Resize document if it exceeds max size
+function resizeDocIfNeeded(doc, maxSize) {
+    maxSize = maxSize || 1024;
+    if (doc.width.as("px") > maxSize || doc.height.as("px") > maxSize) {
+        if (doc.width.as("px") > doc.height.as("px")) {
+            doc.resizeImage(UnitValue(maxSize, "px"), undefined, undefined, ResampleMethod.BICUBIC);
+        } else {
+            doc.resizeImage(undefined, UnitValue(maxSize, "px"), undefined, ResampleMethod.BICUBIC);
+        }
+    }
+}
+
 function exportLayers(originalDoc, layersToKeep, file, settings) {
     // New Method: Create Temp Doc -> Duplicate Layers into it -> Flatten -> Save
     // This avoids "frontmost document" errors and history state issues.
@@ -1295,6 +1335,7 @@ function exportLayers(originalDoc, layersToKeep, file, settings) {
         }
 
         newDoc.flatten();
+        resizeDocIfNeeded(newDoc, settings.maxSize);
         saveImage(newDoc, file, settings);
 
     } catch (e) {
@@ -1354,15 +1395,8 @@ function saveJpeg(doc, file, quality) {
 function exportImage(doc, file, settings) {
     var dup = doc.duplicate();
 
-    // Resize if too large (max 4096px)
-    var maxDim = 4096;
-    if (dup.width.as("px") > maxDim || dup.height.as("px") > maxDim) {
-        if (dup.width.as("px") > dup.height.as("px")) {
-            dup.resizeImage(UnitValue(maxDim, "px"), undefined, undefined, ResampleMethod.BICUBIC);
-        } else {
-            dup.resizeImage(undefined, UnitValue(maxDim, "px"), undefined, ResampleMethod.BICUBIC);
-        }
-    }
+    // Resize if too large
+    resizeDocIfNeeded(dup, settings.maxSize);
 
     dup.flatten(); // JPEGs must be flattened usually, but saveAs handles it. Explicit flatten is safer for consistency.
     saveImage(dup, file, settings);
