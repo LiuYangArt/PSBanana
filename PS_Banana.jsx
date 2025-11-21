@@ -1079,9 +1079,65 @@ function placeImage(doc, file) {
 
     try {
         doc.paste();
+        var newLayer = doc.activeLayer;
+
+        // Move to top of document (outside groups)
+        try {
+            newLayer.move(doc, ElementPlacement.PLACEATBEGINNING);
+        } catch (e) {
+            // Ignore if already at top or move fails (e.g. background layer issues)
+        }
+
+        // Rename
+        newLayer.name = getNextBananaLayerName(doc);
+
     } catch (e) {
         alert("Failed to paste image: " + e.message);
     }
+}
+
+function getNextBananaLayerName(doc) {
+    var prefix = "BananaImage ";
+    var maxNum = 0;
+
+    function checkLayer(layer) {
+        if (layer.name.indexOf(prefix) === 0) {
+            var numStr = layer.name.substring(prefix.length);
+            var num = parseInt(numStr, 10);
+            if (!isNaN(num) && num > maxNum) {
+                maxNum = num;
+            }
+        }
+    }
+
+    // Scan top level layers
+    for (var i = 0; i < doc.layers.length; i++) {
+        checkLayer(doc.layers[i]);
+    }
+
+    // Also scan inside groups if needed? 
+    // The user said "BananaImage + 序号", usually unique across the doc or at least top level.
+    // Let's do a deep scan to be safe, or just top level?
+    // User screenshot shows "BananaImage 01" at top level. 
+    // Let's stick to a simple scan of all layers to ensure uniqueness.
+
+    traverseLayers(doc, checkLayer);
+
+    var nextNum = maxNum + 1;
+    var nextNumStr = nextNum < 10 ? "0" + nextNum : "" + nextNum;
+    return prefix + nextNumStr;
+}
+
+function traverseLayers(parent, callback) {
+    try {
+        for (var i = 0; i < parent.layers.length; i++) {
+            var layer = parent.layers[i];
+            callback(layer);
+            if (layer.typename == "LayerSet") {
+                traverseLayers(layer, callback);
+            }
+        }
+    } catch (e) { }
 }
 
 // Helper: Check if there is an active selection
