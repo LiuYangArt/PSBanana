@@ -144,7 +144,9 @@ var defaultSettings = {
     apiKey: "",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     model: "gemini-2.5-flash-image",
-    debugMode: false
+    debugMode: false,
+    useJpeg: false,
+    jpegQuality: 8
 };
 
 var defaultPresets = [
@@ -232,6 +234,118 @@ function showDialog() {
     var btnGenerate = tabGenerate.add("button", undefined, "Generate Image");
     btnGenerate.preferredSize.height = 40;
 
+    // ========================================================================
+    // Layer Mode UI
+    // ========================================================================
+    var pnlMode = tabGenerate.add("panel", undefined, "Mode");
+    pnlMode.orientation = "column";
+    pnlMode.alignChildren = ["left", "top"];
+    pnlMode.margins = 10;
+    var radFile = pnlMode.add("radiobutton", undefined, "File Mode (Merge All)");
+    var radLayer = pnlMode.add("radiobutton", undefined, "Layer Mode (Selected Layers)");
+    radFile.value = true;
+
+    // Layer Selection Panel
+    var pnlLayers = tabGenerate.add("panel", undefined, "Layer Selection");
+    pnlLayers.orientation = "column";
+    pnlLayers.alignChildren = ["fill", "top"];
+    pnlLayers.preferredSize.height = 200;
+    pnlLayers.margins = 10;
+
+    // Source Layer
+    var grpSource = pnlLayers.add("group");
+    grpSource.orientation = "row";
+    grpSource.add("statictext", undefined, "Source Layer:");
+    var dropSource = grpSource.add("dropdownlist", undefined, []);
+    dropSource.preferredSize.width = 250;
+
+    // Reference Layers
+    pnlLayers.add("statictext", undefined, "Reference Layers (Ctrl/Cmd+Click to select multiple):");
+    var listRef = pnlLayers.add("listbox", undefined, [], { multiselect: true });
+    listRef.preferredSize.height = 100;
+    listRef.preferredSize.width = 380;
+
+    var btnRefresh = pnlLayers.add("button", undefined, "Refresh Layers");
+
+    // Layer Logic Variables
+    var allLayers = [];
+
+    var loadLayers = function () {
+        if (!app.documents.length) return;
+        var doc = app.activeDocument;
+
+        // Flatten layer list for dropdowns
+        allLayers = [];
+        traverseLayers(doc, function (layer) {
+            allLayers.push(layer);
+        });
+
+        // Populate Source Dropdown
+        dropSource.removeAll();
+        listRef.removeAll();
+
+        var sourceIndex = -1;
+        var refIndices = [];
+        var activeLayer = doc.activeLayer;
+
+        for (var i = 0; i < allLayers.length; i++) {
+            var layer = allLayers[i];
+            var name = layer.name;
+
+            dropSource.add("item", name);
+            listRef.add("item", name);
+
+            // Auto-select logic
+            var lowerName = name.toLowerCase();
+
+            // Source: Priority to "source", then active layer
+            if (lowerName.indexOf("source") !== -1) {
+                if (sourceIndex === -1 || allLayers[sourceIndex].name.toLowerCase().indexOf("source") === -1) {
+                    sourceIndex = i;
+                }
+            }
+
+            // Ref: Priority to "reference"
+            if (lowerName.indexOf("reference") !== -1) {
+                refIndices.push(i);
+            }
+        }
+
+        // Fallback for Source: Active Layer
+        if (sourceIndex === -1 && activeLayer) {
+            for (var j = 0; j < allLayers.length; j++) {
+                if (allLayers[j] == activeLayer) {
+                    sourceIndex = j;
+                    break;
+                }
+            }
+        }
+        if (sourceIndex === -1 && allLayers.length > 0) sourceIndex = 0;
+
+        // Set Selections
+        if (sourceIndex !== -1) dropSource.selection = sourceIndex;
+
+        for (var k = 0; k < refIndices.length; k++) {
+            listRef.items[refIndices[k]].selected = true;
+        }
+    };
+
+    var updateUI = function () {
+        var isLayer = radLayer.value;
+        pnlLayers.enabled = isLayer;
+        pnlLayers.visible = isLayer; // Hide if not active to save space? Or just disable.
+        // Layout fix if visibility changes
+        // win.layout.layout(true); 
+    };
+
+    btnRefresh.onClick = loadLayers;
+    radLayer.onClick = updateUI;
+    radFile.onClick = updateUI;
+
+    // Initial Load
+    loadLayers();
+    updateUI();
+
     // --- Tab 2: Settings ---
     var tabSettings = tabs.add("tab", undefined, "Settings");
     tabSettings.orientation = "column";
@@ -271,9 +385,27 @@ function showDialog() {
     var txtModel = grpModel.add("edittext", undefined, settings.model);
     txtModel.preferredSize.width = 300;
 
-    // Debug Mode
     var chkDebug = tabSettings.add("checkbox", undefined, "Enable Debug Mode (Log prompts & keep temp images)");
     chkDebug.value = settings.debugMode === true;
+
+    // JPEG Compression
+    var grpJpeg = tabSettings.add("group");
+    grpJpeg.orientation = "row";
+    var chkJpeg = grpJpeg.add("checkbox", undefined, "Use JPEG Compression (Faster, No Alpha)");
+    chkJpeg.value = settings.useJpeg === true;
+
+    var grpQuality = tabSettings.add("group");
+    grpQuality.orientation = "row";
+    grpQuality.add("statictext", undefined, "JPEG Quality (0-12):");
+    var txtQuality = grpQuality.add("edittext", undefined, settings.jpegQuality || 8);
+    txtQuality.preferredSize.width = 50;
+
+    // Toggle Quality input visibility based on Checkbox
+    var updateQualityVisibility = function () {
+        grpQuality.visible = chkJpeg.value;
+    };
+    chkJpeg.onClick = updateQualityVisibility;
+    updateQualityVisibility();
 
     var grpActions = tabSettings.add("group");
     grpActions.orientation = "row";
@@ -363,6 +495,8 @@ function showDialog() {
         settings.baseUrl = txtBaseUrl.text;
         settings.model = txtModel.text;
         settings.debugMode = chkDebug.value;
+        settings.useJpeg = chkJpeg.value;
+        settings.jpegQuality = parseInt(txtQuality.text) || 8;
         saveJsonFile(SETTINGS_FILE_NAME, settings);
         alert("Settings saved!");
     };
@@ -384,10 +518,38 @@ function showDialog() {
         settings.baseUrl = txtBaseUrl.text;
         settings.baseUrl = txtBaseUrl.text;
         settings.model = txtModel.text;
+        settings.model = txtModel.text;
         settings.debugMode = chkDebug.value;
+        settings.useJpeg = chkJpeg.value;
+        settings.jpegQuality = parseInt(txtQuality.text) || 8;
 
         try {
-            processGeneration(settings, txtPrompt.text);
+            var generationOptions = {
+                mode: radFile.value ? "file" : "layer",
+                sourceLayer: null,
+                refLayers: []
+            };
+
+            if (generationOptions.mode === "layer") {
+                if (!dropSource.selection) {
+                    alert("Please select a Source Layer.");
+                    return;
+                }
+                generationOptions.sourceLayer = allLayers[dropSource.selection.index];
+
+                var selRef = listRef.selection;
+                if (selRef) {
+                    if (selRef instanceof Array) {
+                        for (var i = 0; i < selRef.length; i++) {
+                            generationOptions.refLayers.push(allLayers[selRef[i].index]);
+                        }
+                    } else {
+                        generationOptions.refLayers.push(allLayers[selRef.index]);
+                    }
+                }
+            }
+
+            processGeneration(settings, txtPrompt.text, generationOptions);
             // win.close(); // Prevent auto-close
         } catch (e) {
             alert("Error: " + e.message);
@@ -402,7 +564,7 @@ function showDialog() {
 // Core Logic
 // ============================================================================
 
-function processGeneration(settings, promptText) {
+function processGeneration(settings, promptText, options) {
     var doc;
     try {
         doc = app.activeDocument;
@@ -412,11 +574,16 @@ function processGeneration(settings, promptText) {
     }
 
     // 1. Determine Output File Paths
-    var tempFolder = Folder.temp;
-    var responseFile = new File(tempFolder.fsName + "/ps_ai_response.json");
-    var payloadFile = new File(tempFolder.fsName + "/ps_ai_payload.json");
+    // Use getAppDataFolder() for consistency
+    var appDataFolder = getAppDataFolder();
+    var responseFile = new File(appDataFolder.fsName + "/ps_ai_response.json");
+    var payloadFile = new File(appDataFolder.fsName + "/ps_ai_payload.json");
     var timestamp = new Date().getTime();
-    var resultImageFile = new File(tempFolder.fsName + "/ps_ai_result_" + timestamp + ".png");
+    var resultImageFile = new File(appDataFolder.fsName + "/ps_ai_result_" + timestamp + ".png");
+
+    // Determine extension and mime type based on settings
+    var ext = settings.useJpeg ? ".jpg" : ".png";
+    var mimeType = settings.useJpeg ? "image/jpeg" : "image/png";
 
     // 2. Construct Payload based on Provider
     var payload = {};
@@ -441,19 +608,34 @@ function processGeneration(settings, promptText) {
         // Yunwu Gemini (Gemini 2.5 Flash Image)
         apiUrl = settings.baseUrl + "/models/" + settings.model + ":generateContent?key=" + settings.apiKey;
 
-        // 1. Export current document to temp PNG
-        var inputImageFile = new File(tempFolder.fsName + "/ps_ai_input.png");
-        var maskImageFile = new File(tempFolder.fsName + "/ps_ai_mask.png");
-        var base64Mask = null;
-        var base64Image = null;
+        var maskImageFile = new File(appDataFolder.fsName + "/ps_ai_mask" + ext);
+        var sourceImageFile = new File(appDataFolder.fsName + "/ps_ai_source" + ext);
+        var refImageFile = new File(appDataFolder.fsName + "/ps_ai_ref" + ext);
 
+        var base64Mask = null;
+        var base64Source = null;
+        var base64Ref = null;
+
+        // 1. Handle Mask (Common for both modes if selection exists)
         // Save history state to revert mask layer creation
         var savedState = doc.activeHistoryState;
 
-        // Check for Selection and Create Mask
         if (hasSelection(doc)) {
             createMaskLayer(doc);
-            exportCurrentStateToPng(maskImageFile);
+            // Mask is always black and white, PNG is usually better/safer for masks to avoid artifacts, 
+            // but if user wants speed, JPEG is fine too. However, masks rely on pure black/white.
+            // JPEG artifacts might introduce noise. Let's stick to PNG for MASK if possible, 
+            // OR ensure high quality JPEG. 
+            // Actually, for the API, it just needs an image.
+            // Let's use the user preference for consistency, but maybe force PNG for mask if issues arise.
+            // For now: Use settings.
+            exportImage(doc, maskImageFile, settings);
+            // Wait, exportCurrentStateToPng exports the whole doc flattened. 
+            // In createMaskLayer, we fill selection. We need to ensure ONLY mask is visible?
+            // Actually createMaskLayer makes a new layer on top. 
+            // exportCurrentStateToPng duplicates and flattens. So it will see the mask layer on top.
+            // Correct.
+
             base64Mask = encodeFileToBase64(maskImageFile);
 
             // Revert to original state (removes mask layer, restores selection)
@@ -463,36 +645,78 @@ function processGeneration(settings, promptText) {
             if (maskImageFile.exists && !settings.debugMode) maskImageFile.remove();
         }
 
-        // Export Input Image (Clean state)
-        exportCurrentStateToPng(inputImageFile);
-        base64Image = encodeFileToBase64(inputImageFile);
+        // 2. Handle Images based on Mode
+        if (options && options.mode === "layer") {
+            // --- Layer Mode ---
 
-        // Cleanup input image
-        if (inputImageFile.exists && !settings.debugMode) inputImageFile.remove();
+            // Export Source Layer
+            exportLayers(doc, [options.sourceLayer], sourceImageFile, settings);
+            if (sourceImageFile.exists) {
+                base64Source = encodeFileToBase64(sourceImageFile);
+                if (!settings.debugMode) sourceImageFile.remove();
+            }
+
+            // Export Reference Layers
+            if (options.refLayers.length > 0) {
+                exportLayers(doc, options.refLayers, refImageFile, settings);
+                if (refImageFile.exists) {
+                    base64Ref = encodeFileToBase64(refImageFile);
+                    if (!settings.debugMode) refImageFile.remove();
+                }
+            }
+
+            // Debug Alert for Layer Mode
+            if (settings.debugMode) {
+                var msg = "Debug Mode - Layer Export:\n";
+                msg += "Source: " + options.sourceLayer.name + "\nPath: " + sourceImageFile.fsName + "\n";
+                if (options.refLayers.length > 0) {
+                    msg += "References (" + options.refLayers.length + "):\nPath: " + refImageFile.fsName + "\n";
+                    for (var i = 0; i < options.refLayers.length; i++) msg += "- " + options.refLayers[i].name + "\n";
+                }
+                if (base64Mask) msg += "Mask: Yes\nPath: " + maskImageFile.fsName;
+                alert(msg);
+            }
+
+        } else {
+            // --- File Mode (Default) ---
+            exportImage(doc, sourceImageFile, settings);
+            base64Source = encodeFileToBase64(sourceImageFile);
+            if (!settings.debugMode) sourceImageFile.remove();
+        }
+
 
         // 4. Construct Payload
         var parts = [{ text: promptText }];
 
         // Add System Prompt for Selection if mask exists
         if (base64Mask) {
-            // Prepend instruction to prompt or use system_instruction if supported (Gemini 1.5+ supports it, sticking to prompt for safety)
-            parts[0].text = "System Instruction: The second image provided is a black and white mask. White areas represent the selection where edits should be applied. Black areas should remain unchanged. | 提供的第二张图片是一个黑白蒙版。白色区域表示应应用编辑的选区。黑色区域应保持不变。\n\nUser Prompt: " + promptText;
+            parts[0].text = "System Instruction: The first image provided is a black and white mask. White areas represent the selection where edits should be applied. Black areas should remain unchanged. | 提供的第一张图片是一个黑白蒙版。白色区域表示应应用编辑的选区。黑色区域应保持不变。\n\nUser Prompt: " + promptText;
         }
 
-        if (base64Image) {
+        // Order: Mask -> Source -> Ref
+        if (base64Mask) {
             parts.push({
                 inline_data: {
-                    mime_type: "image/png",
-                    data: base64Image
+                    mime_type: mimeType,
+                    data: base64Mask
                 }
             });
         }
 
-        if (base64Mask) {
+        if (base64Source) {
             parts.push({
                 inline_data: {
-                    mime_type: "image/png",
-                    data: base64Mask
+                    mime_type: mimeType,
+                    data: base64Source
+                }
+            });
+        }
+
+        if (base64Ref) {
+            parts.push({
+                inline_data: {
+                    mime_type: mimeType,
+                    data: base64Ref
                 }
             });
         }
@@ -505,9 +729,6 @@ function processGeneration(settings, promptText) {
                 responseModalities: ["image"]
             }
         };
-
-        // Cleanup input image (Already handled above)
-        // if (inputImageFile.exists && !settings.debugMode) inputImageFile.remove(); 
 
     } else {
         // OpenRouter / OpenAI Compatible
@@ -728,25 +949,11 @@ function hasSelection(doc) {
 }
 
 // Helper: Export current selection or document to PNG (Not used in Text-to-Image but ready for Img2Img)
+// Helper: Export current selection or document to PNG (Not used in Text-to-Image but ready for Img2Img)
+// DEPRECATED: Use exportImage instead
 function exportCurrentStateToPng(file) {
-    var doc = app.activeDocument;
-    var dup = doc.duplicate();
-
-    // Resize if too large (max 2048px) to prevent massive payloads and freezing
-    var maxDim = 4096;
-    if (dup.width.as("px") > maxDim || dup.height.as("px") > maxDim) {
-        if (dup.width.as("px") > dup.height.as("px")) {
-            dup.resizeImage(UnitValue(maxDim, "px"), undefined, undefined, ResampleMethod.BICUBIC);
-        } else {
-            dup.resizeImage(undefined, UnitValue(maxDim, "px"), undefined, ResampleMethod.BICUBIC);
-        }
-    }
-
-    dup.flatten();
-    var opts = new PNGSaveOptions();
-    opts.compression = 9;
-    dup.saveAs(file, opts, true, Extension.LOWERCASE);
-    dup.close(SaveOptions.DONOTSAVECHANGES);
+    // Redirect to new function with default settings (PNG)
+    exportImage(app.activeDocument, file, { useJpeg: false });
 }
 
 function testApiConnection(settings) {
@@ -838,6 +1045,146 @@ function createMaskLayer(doc) {
 
     // Deselect to show full mask
     doc.selection.deselect();
+}
+
+// ============================================================================
+// Layer Export Helpers (from LayerTest.jsx)
+// ============================================================================
+
+function exportLayers(originalDoc, layersToKeep, file, settings) {
+    var dup = originalDoc.duplicate();
+
+    // Resize if too large (max 4096px) to match exportCurrentStateToPng
+    var maxDim = 4096;
+    if (dup.width.as("px") > maxDim || dup.height.as("px") > maxDim) {
+        if (dup.width.as("px") > dup.height.as("px")) {
+            dup.resizeImage(UnitValue(maxDim, "px"), undefined, undefined, ResampleMethod.BICUBIC);
+        } else {
+            dup.resizeImage(undefined, UnitValue(maxDim, "px"), undefined, ResampleMethod.BICUBIC);
+        }
+    }
+
+    var keepNames = {};
+    for (var i = 0; i < layersToKeep.length; i++) {
+        keepNames[layersToKeep[i].name] = true;
+    }
+
+    // 1. Set Visibility
+    var visibleCount = recurseSetVisibility(dup, keepNames);
+
+    // 2. Merge or Save
+    if (visibleCount > 0) {
+        // Fix for "Merge Visible" error:
+        // Only merge if there is more than 1 visible layer.
+        if (visibleCount > 1) {
+            try {
+                dup.mergeVisibleLayers();
+            } catch (e) {
+                // Ignore merge errors if they happen (e.g. weird layer states)
+                // The file will still save the visible state.
+            }
+        }
+
+        saveImage(dup, file, settings);
+    } else {
+        // alert("Warning: No matching layers found to export for " + file.name);
+        // Create a blank/transparent image if nothing selected? Or just fail?
+        // For now, let's save whatever is there (likely empty/transparent)
+        saveImage(dup, file, settings);
+    }
+
+    dup.close(SaveOptions.DONOTSAVECHANGES);
+}
+
+function recurseSetVisibility(parent, keepNames) {
+    var visibleCount = 0;
+    try {
+        for (var i = 0; i < parent.layers.length; i++) {
+            var layer = parent.layers[i];
+
+            if (keepNames[layer.name]) {
+                layer.visible = true;
+                visibleCount++;
+            } else {
+                if (layer.typename == "LayerSet") {
+                    if (containsKeepers(layer, keepNames)) {
+                        layer.visible = true;
+                        visibleCount += recurseSetVisibility(layer, keepNames);
+                    } else {
+                        layer.visible = false;
+                    }
+                } else {
+                    layer.visible = false;
+                }
+            }
+        }
+    } catch (e) {
+        // Ignore errors accessing layers
+    }
+    return visibleCount;
+}
+
+function containsKeepers(layer, keepNames) {
+    if (keepNames[layer.name]) return true;
+    if (layer.typename == "LayerSet") {
+        for (var i = 0; i < layer.layers.length; i++) {
+            if (containsKeepers(layer.layers[i], keepNames)) return true;
+        }
+    }
+    return false;
+}
+
+function traverseLayers(parent, callback) {
+    try {
+        for (var i = 0; i < parent.layers.length; i++) {
+            var layer = parent.layers[i];
+            callback(layer);
+            if (layer.typename == "LayerSet") {
+                traverseLayers(layer, callback);
+            }
+        }
+    } catch (e) { }
+}
+
+function saveImage(doc, file, settings) {
+    if (settings && settings.useJpeg) {
+        saveJpeg(doc, file, settings.jpegQuality);
+    } else {
+        savePng(doc, file);
+    }
+}
+
+function savePng(doc, file) {
+    var opts = new PNGSaveOptions();
+    opts.compression = 9;
+    doc.saveAs(file, opts, true, Extension.LOWERCASE);
+}
+
+function saveJpeg(doc, file, quality) {
+    var opts = new JPEGSaveOptions();
+    opts.quality = quality || 8;
+    opts.formatOptions = FormatOptions.STANDARDBASELINE;
+    opts.matte = MatteType.WHITE; // Flatten transparency to white
+    doc.saveAs(file, opts, true, Extension.LOWERCASE);
+}
+
+// Replaces exportCurrentStateToPng
+function exportImage(doc, file, settings) {
+    var dup = doc.duplicate();
+
+    // Resize if too large (max 4096px)
+    var maxDim = 4096;
+    if (dup.width.as("px") > maxDim || dup.height.as("px") > maxDim) {
+        if (dup.width.as("px") > dup.height.as("px")) {
+            dup.resizeImage(UnitValue(maxDim, "px"), undefined, undefined, ResampleMethod.BICUBIC);
+        } else {
+            dup.resizeImage(undefined, UnitValue(maxDim, "px"), undefined, ResampleMethod.BICUBIC);
+        }
+    }
+
+    dup.flatten(); // JPEGs must be flattened usually, but saveAs handles it. Explicit flatten is safer for consistency.
+    saveImage(dup, file, settings);
+    dup.close(SaveOptions.DONOTSAVECHANGES);
 }
 
 
