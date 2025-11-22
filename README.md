@@ -10,6 +10,7 @@ C:\Program Files\Adobe\Adobe Photoshop 2023\Presets\Scripts\
 
 ## 使用
 - File>Scripts>PS_Banana  运行插件
+- 可以给这个插件设置快捷键，以便快速使用。
 
 ## 功能
 - 支持图层模式， 使用 source  / reference  命名图层组， 可以得到类似chat中发送两张图的效果

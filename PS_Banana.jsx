@@ -239,7 +239,6 @@ function showDialog() {
         dropPresets.add("item", presets[i].name);
     }
 
-    var btnLoadPreset = grpPresets.add("button", undefined, "Use");
     var btnSavePreset = grpPresets.add("button", undefined, "Save");
     var btnDeletePreset = grpPresets.add("button", undefined, "Del");
 
@@ -542,8 +541,8 @@ function showDialog() {
     // Event Listeners
     // ============================================================================
 
-    // Preset Logic
-    btnLoadPreset.onClick = function () {
+    // Preset Logic - Auto-load on selection
+    dropPresets.onChange = function () {
         if (dropPresets.selection) {
             var idx = dropPresets.selection.index;
             txtPrompt.text = presets[idx].prompt;
