@@ -293,6 +293,7 @@ function showDialog() {
     pnlMode.margins = 10;
     var radFile = pnlMode.add("radiobutton", undefined, "File Mode (Merge All)");
     var radLayer = pnlMode.add("radiobutton", undefined, "Layer Mode (Selected Layers)");
+    var radDirect = pnlMode.add("radiobutton", undefined, "Direct Mode (Prompt Only)");
     radFile.value = true;
 
     // Layer Selection Panel
@@ -460,6 +461,7 @@ function showDialog() {
 
     radLayer.onClick = updateUI;
     radFile.onClick = updateUI;
+    radDirect.onClick = updateUI;
 
     // Initial Load
     loadLayers();
@@ -745,7 +747,7 @@ function showDialog() {
 
         try {
             var generationOptions = {
-                mode: radFile.value ? "file" : "layer",
+                mode: radDirect.value ? "direct" : (radFile.value ? "file" : "layer"),
                 sourceLayers: [],
                 refLayers: []
             };
@@ -901,6 +903,19 @@ function processGeneration(settings, promptText, options) {
                 alert(msg);
             }
 
+        } else if (options && options.mode === "direct") {
+            // --- Direct Mode ---
+            // No layer export, only prompt with canvas dimensions
+            // Mask is still supported if selection exists
+
+            if (settings.debugMode) {
+                var msg = "Debug Mode - Direct Mode:\n";
+                msg += "Canvas Size: " + doc.width.as("px") + "x" + doc.height.as("px") + " px\n";
+                if (base64Mask) msg += "Mask: Yes\nPath: " + maskImageFile.fsName;
+                else msg += "Mask: No";
+                alert(msg);
+            }
+
         } else {
             // --- File Mode (Default) ---
             exportImage(doc, sourceImageFile, settings);
@@ -909,12 +924,20 @@ function processGeneration(settings, promptText, options) {
         }
 
 
+
         // 4. Construct Payload
         var parts = [{ text: promptText }];
 
+        // Add canvas dimensions for Direct Mode
+        if (options && options.mode === "direct") {
+            var canvasWidth = Math.round(doc.width.as("px"));
+            var canvasHeight = Math.round(doc.height.as("px"));
+            parts[0].text = "Generate an image with dimensions " + canvasWidth + "x" + canvasHeight + " pixels. " + promptText;
+        }
+
         // Add System Prompt for Selection if mask exists
         if (base64Mask) {
-            parts[0].text = "System Instruction: The first image provided is a black and white selection mask. White areas represent the selection where edits should be applied. Black areas should remain unchanged. | 提供的第一张图片是一个黑白选区蒙版。白色区域表示应应用编辑的选区。黑色区域应保持不变。\n\nUser Prompt: " + promptText;
+            parts[0].text = "System Instruction: The first image provided is a black and white selection mask. White areas represent the selection where edits should be applied. Black areas should remain unchanged. | 提供的第一张图片是一个黑白选区蒙版。白色区域表示应应用编辑的选区。黑色区域应保持不变。\n\nUser Prompt: " + parts[0].text;
         }
 
         // Order: Mask -> Source -> Ref
