@@ -169,7 +169,8 @@ var defaultSettings = {
     debugMode: false,
     useJpeg: true,
     jpegQuality: 8,
-    maxSize: 1024
+    maxSize: 1024,
+    autoClose: false
 };
 
 var defaultPresets = [
@@ -196,13 +197,25 @@ var defaultProviders = [
 // Helper Functions
 // ============================================================================
 
-function getAppDataFolder() {
-    // Use the pre-determined script folder
+function getConfigFolder() {
+    // Configuration files go in the script folder
     return SCRIPT_FOLDER;
 }
 
+function getTempFolder() {
+    // Temporary files go in AppData\Local\PS_Banana
+    var folder = new Folder(Folder.temp.parent.fsName + "/PS_Banana");
+    if (!folder.exists) folder.create();
+    return folder;
+}
+
+// Deprecated: kept for backward compatibility, redirects to config folder
+function getAppDataFolder() {
+    return getConfigFolder();
+}
+
 function loadJsonFile(fileName, defaultValue) {
-    var file = new File(getAppDataFolder().fsName + "/" + fileName);
+    var file = new File(getConfigFolder().fsName + "/" + fileName);
     if (!file.exists) return defaultValue;
     file.open("r");
     var content = file.read();
@@ -215,7 +228,7 @@ function loadJsonFile(fileName, defaultValue) {
 }
 
 function saveJsonFile(fileName, data) {
-    var file = new File(getAppDataFolder().fsName + "/" + fileName);
+    var file = new File(getConfigFolder().fsName + "/" + fileName);
     file.open("w");
     file.write(JSON.stringify(data, null, 4));
     file.close();
@@ -517,6 +530,9 @@ function showDialog() {
     var chkDebug = tabSettings.add("checkbox", undefined, "Enable Debug Mode (Log prompts & keep temp images)");
     chkDebug.value = settings.debugMode === true;
 
+    var chkAutoClose = tabSettings.add("checkbox", undefined, "Auto Close Window After Generation");
+    chkAutoClose.value = settings.autoClose === true;
+
     // JPEG Compression
     var grpJpeg = tabSettings.add("group");
     grpJpeg.orientation = "row";
@@ -701,6 +717,7 @@ function showDialog() {
         settings.useJpeg = chkJpeg.value;
         settings.jpegQuality = parseInt(txtQuality.text) || 8;
         settings.maxSize = parseInt(txtMaxSize.text) || 1024;
+        settings.autoClose = chkAutoClose.value;
         saveJsonFile(SETTINGS_FILE_NAME, settings);
         alert("Settings saved!");
     };
@@ -725,6 +742,7 @@ function showDialog() {
         settings.useJpeg = chkJpeg.value;
         settings.jpegQuality = parseInt(txtQuality.text) || 8;
         settings.maxSize = parseInt(txtMaxSize.text) || 1024;
+        settings.autoClose = chkAutoClose.value;
 
         try {
             var generationOptions = {
@@ -743,7 +761,11 @@ function showDialog() {
             }
 
             processGeneration(settings, txtPrompt.text, generationOptions);
-            // win.close(); // Prevent auto-close
+
+            // Auto-close if enabled
+            if (settings.autoClose) {
+                win.close();
+            }
         } catch (e) {
             alert("Error: " + e.message);
         }
@@ -767,11 +789,11 @@ function processGeneration(settings, promptText, options) {
     }
 
     // 1. Determine Output File Paths
-    // Use getAppDataFolder() for consistency
-    var appDataFolder = getAppDataFolder();
+    // Use getTempFolder() for temporary files
+    var tempFolder = getTempFolder();
 
     // Clean up old result files from previous generations
-    var oldResults = appDataFolder.getFiles("ps_ai_result_*.png");
+    var oldResults = tempFolder.getFiles("ps_ai_result_*.png");
     if (oldResults) {
         for (var i = 0; i < oldResults.length; i++) {
             try {
@@ -782,10 +804,10 @@ function processGeneration(settings, promptText, options) {
         }
     }
 
-    var responseFile = new File(appDataFolder.fsName + "/ps_ai_response.json");
-    var payloadFile = new File(appDataFolder.fsName + "/ps_ai_payload.json");
+    var responseFile = new File(tempFolder.fsName + "/ps_ai_response.json");
+    var payloadFile = new File(tempFolder.fsName + "/ps_ai_payload.json");
     var timestamp = new Date().getTime();
-    var resultImageFile = new File(appDataFolder.fsName + "/ps_ai_result_" + timestamp + ".png");
+    var resultImageFile = new File(tempFolder.fsName + "/ps_ai_result_" + timestamp + ".png");
 
     // Determine extension and mime type based on settings
     var ext = settings.useJpeg ? ".jpg" : ".png";
@@ -820,9 +842,9 @@ function processGeneration(settings, promptText, options) {
         // Supports Images and Masks
         apiUrl = settings.baseUrl + "/models/" + settings.model + ":generateContent?key=" + settings.apiKey;
 
-        var maskImageFile = new File(appDataFolder.fsName + "/ps_ai_mask" + ext);
-        var sourceImageFile = new File(appDataFolder.fsName + "/ps_ai_source" + ext);
-        var refImageFile = new File(appDataFolder.fsName + "/ps_ai_ref" + ext);
+        var maskImageFile = new File(tempFolder.fsName + "/ps_ai_mask" + ext);
+        var sourceImageFile = new File(tempFolder.fsName + "/ps_ai_source" + ext);
+        var refImageFile = new File(tempFolder.fsName + "/ps_ai_ref" + ext);
 
         var base64Mask = null;
         var base64Source = null;
