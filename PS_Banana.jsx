@@ -293,7 +293,7 @@ function showDialog() {
     pnlMode.margins = 10;
     var radFile = pnlMode.add("radiobutton", undefined, "File Mode (Merge All)");
     var radLayer = pnlMode.add("radiobutton", undefined, "Layer Mode (Selected Layers)");
-    var radDirect = pnlMode.add("radiobutton", undefined, "Direct Mode (Prompt Only)");
+    var radDirect = pnlMode.add("radiobutton", undefined, "Direct Mode (Text To Image)");
     radFile.value = true;
 
     // Layer Selection Panel
