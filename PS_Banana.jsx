@@ -485,6 +485,8 @@ function showDialog() {
     btnSaveProvider.preferredSize.width = 50;
     var btnDeleteProvider = grpProvider.add("button", undefined, "Del");
     btnDeleteProvider.preferredSize.width = 40;
+    var btnTest = grpProvider.add("button", undefined, "Test Connection");
+    btnTest.preferredSize.width = 120;
 
     // Populate Providers
     var populateProviders = function () {
@@ -560,10 +562,7 @@ function showDialog() {
     chkJpeg.onClick = updateQualityVisibility;
     updateQualityVisibility();
 
-    var grpActions = tabSettings.add("group");
-    grpActions.orientation = "row";
-    var btnTest = grpActions.add("button", undefined, "Test Connection");
-    var btnSaveSettings = grpActions.add("button", undefined, "Save Settings");
+    var btnSaveSettings = tabSettings.add("button", undefined, "Save Settings");
 
     // Footer (Close Button)
     var grpFooter = win.add("group");
