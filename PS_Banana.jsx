@@ -1,6 +1,27 @@
 #target photoshop
 
 // ============================================================================
+// Script Folder Path (Must be set before any other code)
+// ============================================================================
+var SCRIPT_FOLDER = (function () {
+    try {
+        // Try to get the script file path
+        var scriptFile = new File($.fileName);
+        // Check if we're running from a temp location (VSCode extension)
+        if (scriptFile.parent.fsName.indexOf("antigravity") !== -1 ||
+            scriptFile.parent.fsName.indexOf("vscode") !== -1) {
+            // We're running from VSCode extension, use a hardcoded path
+            // This should be updated to match your actual script location
+            return new Folder("e:/SF_ActiveDocs/PSBanana");
+        }
+        return scriptFile.parent;
+    } catch (e) {
+        // Fallback to a default location
+        return new Folder("e:/SF_ActiveDocs/PSBanana");
+    }
+})();
+
+// ============================================================================
 // JSON Polyfill (Required for ExtendScript)
 // ============================================================================
 if (typeof JSON !== 'object') {
@@ -136,9 +157,9 @@ if (typeof JSON !== 'object') {
 // ============================================================================
 // Global Variables & Settings
 // ============================================================================
-var SETTINGS_FILE_NAME = "PS_AI_Plugin_Settings.json";
-var PRESETS_FILE_NAME = "PS_AI_Plugin_Presets.json";
-var PROVIDERS_FILE_NAME = "PS_AI_Plugin_Providers.json";
+var SETTINGS_FILE_NAME = "PS_Banana_Settings.json";
+var PRESETS_FILE_NAME = "PS_Banana_Presets.json";
+var PROVIDERS_FILE_NAME = "PS_Banana_Providers.json";
 
 var defaultSettings = {
     provider: "Google Gemini",
@@ -176,9 +197,8 @@ var defaultProviders = [
 // ============================================================================
 
 function getAppDataFolder() {
-    var folder = new Folder(Folder.userData.fsName + "/PS_AI_Plugin");
-    if (!folder.exists) folder.create();
-    return folder;
+    // Use the pre-determined script folder
+    return SCRIPT_FOLDER;
 }
 
 function loadJsonFile(fileName, defaultValue) {
