@@ -937,9 +937,28 @@ function processGeneration(settings, promptText, options) {
             parts[0].text = "Generate an image with dimensions " + canvasWidth + "x" + canvasHeight + " pixels. " + promptText;
         }
 
-        // Add System Prompt for Selection if mask exists
+        // Add System Prompt to identify images
+        var systemInstructions = [];
+        var imgCount = 0;
+
         if (base64Mask) {
-            parts[0].text = "System Instruction: The first image provided is a black and white selection mask. White areas represent the selection where edits should be applied. Black areas should remain unchanged. | 提供的第一张图片是一个黑白选区蒙版。白色区域表示应应用编辑的选区。黑色区域应保持不变。\n\nUser Prompt: " + parts[0].text;
+            imgCount++;
+            systemInstructions.push("Image " + imgCount + " is a black and white selection mask (White=Edit, Black=Keep).");
+        }
+
+        if (base64Source) {
+            imgCount++;
+            systemInstructions.push("Image " + imgCount + " is the Source Layer (the content to be modified).");
+        }
+
+        if (base64Ref) {
+            imgCount++;
+            systemInstructions.push("Image " + imgCount + " is the Reference Layer (use this for style/content reference).");
+        }
+
+        if (systemInstructions.length > 0) {
+            var sysPrompt = "System Instruction: " + systemInstructions.join(" ") + "\n";
+            parts[0].text = sysPrompt + "\nUser Prompt: " + parts[0].text;
         }
 
         // Order: Mask -> Source -> Ref

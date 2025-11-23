@@ -33,7 +33,7 @@
     },
     {
         "name": "Concept 展示 - PhotoReal - Example (LayerMode)",
-        "prompt": "\n\n## 画面描述\n\n\n让source layer中的角色， 手持 reference layer中的 枪（1），在 街道背景（2）中行走，   镜头角度和持枪姿势参考 (3) 。  \n\n\n\n## 画面效果\n\n- 使用徕卡相机拍摄， 呈现纪实摄影的效果\n- 有胶片相机/镜头拍摄特有的光学瑕疵 \n\n- 镜头焦距：120mm 光圈：4.0\n- 对焦位置：\n"
+        "prompt": "\n\n## 画面描述\n\n\n让source layer中的角色， 手持 reference layer中的 枪（1），在 街道背景（2）中行走，   镜头角度和持枪姿势参考 (3) 。  \n\n\n\n## 画面效果\n\n- 使用徕卡相机拍摄， 呈现纪实摄影的效果\n- 镜头焦距：120mm 光圈：4.0\n"
     },
     {
         "name": "Editing by Reference (Layer Mode Only)",
