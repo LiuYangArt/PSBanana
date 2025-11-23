@@ -279,6 +279,8 @@ function showDialog() {
     btnAddPreset.preferredSize.width = 30;
     var btnSavePreset = grpPresets.add("button", undefined, "Save");
     btnSavePreset.preferredSize.width = 50;
+    var btnRenamePreset = grpPresets.add("button", undefined, "Rename");
+    btnRenamePreset.preferredSize.width = 60;
     var btnDeletePreset = grpPresets.add("button", undefined, "Del");
     btnDeletePreset.preferredSize.width = 40;
 
@@ -689,6 +691,22 @@ function showDialog() {
 
         saveJsonFile(PRESETS_FILE_NAME, presets);
         alert("Preset saved!");
+    };
+
+    btnRenamePreset.onClick = function () {
+        if (!dropPresets.selection) return;
+        var idx = dropPresets.selection.index;
+        var oldName = presets[idx].name;
+
+        var newName = prompt("Enter new name for preset:", oldName);
+        if (newName && newName !== oldName) {
+            presets[idx].name = newName;
+            saveJsonFile(PRESETS_FILE_NAME, presets);
+
+            // Update UI
+            dropPresets.items[idx].text = newName;
+            // dropPresets.selection = idx; // Selection should stay same
+        }
     };
 
     btnDeletePreset.onClick = function () {
