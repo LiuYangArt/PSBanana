@@ -1049,12 +1049,39 @@ function processGeneration(settings, promptText, options) {
     var b64Data = null;
 
     // Try Gemini structure first (candidates)
+    // Try Gemini structure first (candidates)
     if (response.candidates && response.candidates.length > 0) {
         var parts = response.candidates[0].content.parts;
         for (var i = 0; i < parts.length; i++) {
             if (parts[i].inlineData && parts[i].inlineData.data) {
                 b64Data = parts[i].inlineData.data;
                 break;
+            } else if (parts[i].text) {
+                // Check if text contains base64 image (Markdown or raw)
+                var txt = parts[i].text;
+
+                // Look for data URI pattern
+                var dataIdx = txt.indexOf("data:image");
+                if (dataIdx !== -1) {
+                    var commaIdx = txt.indexOf(",", dataIdx);
+                    if (commaIdx !== -1) {
+                        var rawB64 = txt.substring(commaIdx + 1);
+                        // If inside markdown ![...](...), it ends with )
+                        var endIdx = rawB64.indexOf(")");
+                        if (endIdx !== -1) {
+                            b64Data = rawB64.substring(0, endIdx);
+                        } else {
+                            b64Data = rawB64;
+                        }
+                        // Clean whitespace
+                        b64Data = b64Data.replace(/\s/g, "");
+                        break;
+                    }
+                } else if (txt.length > 1000 && txt.indexOf("{") === -1) {
+                    // Assume raw base64 if long and doesn't look like JSON
+                    b64Data = txt.replace(/\s/g, "");
+                    break;
+                }
             }
         }
     }
@@ -1114,21 +1141,60 @@ function processGeneration(settings, promptText, options) {
     }
 }
 
-// Helper: Save Base64 string to PNG file using certutil (Windows)
+// Helper: Save Base64 string to PNG file using PowerShell (More robust for large files)
 function saveBase64ToPng(b64String, outputFile) {
     if (outputFile.exists) outputFile.remove();
     var tempB64File = new File(Folder.temp.fsName + "/ps_ai_temp.b64");
+    var errorFile = new File(Folder.temp.fsName + "/ps_ai_error.txt");
+    if (errorFile.exists) errorFile.remove();
 
+    // Write raw base64 to file
     tempB64File.open("w");
-    tempB64File.write("-----BEGIN CERTIFICATE-----\n");
     tempB64File.write(b64String);
-    tempB64File.write("\n-----END CERTIFICATE-----");
     tempB64File.close();
 
-    var cmd = 'certutil -decode "' + tempB64File.fsName + '" "' + outputFile.fsName + '"';
+    // PowerShell command to decode
+    // We use a temporary script file to avoid command line length limits
+    var psScriptFile = new File(Folder.temp.fsName + "/ps_ai_decode.ps1");
+    psScriptFile.open("w");
+
+    // Escape paths for PowerShell (replace backslashes with double backslashes or use single quotes)
+    // Using single quotes is safer for paths in PS
+    var b64Path = tempB64File.fsName;
+    var outPath = outputFile.fsName;
+    var errPath = errorFile.fsName;
+
+    var scriptContent = "try {\n";
+    scriptContent += "    $b64 = [System.IO.File]::ReadAllText('" + b64Path + "');\n";
+    scriptContent += "    $bytes = [System.Convert]::FromBase64String($b64);\n";
+    scriptContent += "    [System.IO.File]::WriteAllBytes('" + outPath + "', $bytes);\n";
+    scriptContent += "} catch {\n";
+    scriptContent += "    Set-Content -Path '" + errPath + "' -Value $_.Exception.Message;\n";
+    scriptContent += "    exit 1;\n";
+    scriptContent += "}";
+
+    psScriptFile.write(scriptContent);
+    psScriptFile.close();
+
+    var cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + psScriptFile.fsName + '"';
     app.system(cmd);
 
-    tempB64File.remove();
+    // Cleanup
+    if (tempB64File.exists) tempB64File.remove();
+    if (psScriptFile.exists) psScriptFile.remove();
+
+    // Check for errors
+    if (errorFile.exists) {
+        errorFile.open("r");
+        var err = errorFile.read();
+        errorFile.close();
+        errorFile.remove();
+        throw new Error("PowerShell Decode Error: " + err);
+    }
+
+    if (!outputFile.exists) {
+        throw new Error("PowerShell Decode Failed: Output file not created (Unknown Error).");
+    }
 }
 
 // Helper: Encode file to Base64 string using certutil (Windows)
