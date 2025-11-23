@@ -473,6 +473,37 @@ function showDialog() {
     loadLayers();
     updateUI();
 
+    // --- Tab 3: Utilities ---
+    var tabUtilities = tabs.add("tab", undefined, "Utilities");
+    tabUtilities.orientation = "column";
+    tabUtilities.alignChildren = ["fill", "top"];
+    tabUtilities.spacing = 10;
+    tabUtilities.margins = 10;
+
+    var pnlCanvas = tabUtilities.add("panel", undefined, "Canvas Tools");
+    pnlCanvas.orientation = "column";
+    pnlCanvas.alignChildren = ["left", "top"];
+    pnlCanvas.margins = 10;
+
+    pnlCanvas.add("statictext", undefined, "Nano Banana Pro Aspect Ratios:");
+    pnlCanvas.add("statictext", undefined, "1:1, 16:9, 9:16, 4:3, 21:9");
+
+    var btnSmartResize = pnlCanvas.add("button", undefined, "Smart Resize Canvas");
+    btnSmartResize.preferredSize.width = 200;
+    btnSmartResize.helpTip = "Adjusts canvas to the nearest supported aspect ratio while keeping the long edge fixed.";
+
+    btnSmartResize.onClick = function () {
+        try {
+            if (app.documents.length === 0) {
+                alert("No active document.");
+                return;
+            }
+            smartResizeCanvas(app.activeDocument);
+        } catch (e) {
+            alert("Error resizing canvas: " + e.message);
+        }
+    };
+
     // --- Tab 2: Settings ---
     var tabSettings = tabs.add("tab", undefined, "Settings");
     tabSettings.orientation = "column";
@@ -1585,6 +1616,83 @@ function exportImage(doc, file, settings) {
     dup.flatten(); // JPEGs must be flattened usually, but saveAs handles it. Explicit flatten is safer for consistency.
     saveImage(dup, file, settings);
     dup.close(SaveOptions.DONOTSAVECHANGES);
+}
+
+
+// Helper: Smart Resize Canvas
+function smartResizeCanvas(doc) {
+    var width = doc.width.as("px");
+    var height = doc.height.as("px");
+    var currentRatio = width / height;
+
+    // Supported Ratios
+    var ratios = [
+        { name: "1:1", value: 1.0 },
+        { name: "16:9", value: 16 / 9 },
+        { name: "9:16", value: 9 / 16 },
+        { name: "4:3", value: 4 / 3 },
+        { name: "21:9", value: 21 / 9 }
+    ];
+
+    // Find closest ratio
+    var bestRatio = ratios[0];
+    var minDiff = Math.abs(currentRatio - bestRatio.value);
+
+    for (var i = 1; i < ratios.length; i++) {
+        var diff = Math.abs(currentRatio - ratios[i].value);
+        if (diff < minDiff) {
+            minDiff = diff;
+            bestRatio = ratios[i];
+        }
+    }
+
+    // Calculate new dimensions
+    // Rule: Keep long edge, adjust short edge
+    var newWidth, newHeight;
+
+    if (bestRatio.value >= 1) {
+        // Target is Landscape or Square
+        if (width >= height) {
+            // Current is Landscape/Square -> Keep Width (Long), Adjust Height
+            // But wait, if current is 1000x500 (2:1), target 16:9 (1.77).
+            // If we keep width 1000, height = 1000 / 1.77 = 565.
+            // If we keep height 500, width = 500 * 1.77 = 885.
+            // "Keep long edge" usually means maximize the canvas within the constraints or fit to it?
+            // User said: "Keep long side, adjust short side".
+            // So if Width is Long, NewWidth = Width. NewHeight = Width / TargetRatio.
+            newWidth = width;
+            newHeight = width / bestRatio.value;
+        } else {
+            // Current is Portrait (Width < Height), but Target is Landscape (Ratio >= 1)?
+            // This case implies a drastic change, but let's follow the rule "Keep long side".
+            // Long side is Height.
+            // But Target Ratio is W/H.
+            // If we keep Height (Long), NewWidth = Height * TargetRatio.
+            newWidth = height * bestRatio.value;
+            newHeight = height;
+        }
+    } else {
+        // Target is Portrait (Ratio < 1)
+        if (height >= width) {
+            // Current is Portrait/Square -> Keep Height (Long), Adjust Width
+            newHeight = height;
+            newWidth = height * bestRatio.value;
+        } else {
+            // Current is Landscape (Width > Height), but Target is Portrait?
+            // Long side is Width.
+            // Keep Width. NewHeight = Width / TargetRatio.
+            newWidth = width;
+            newHeight = width / bestRatio.value;
+        }
+    }
+
+    // Round to integers
+    newWidth = Math.round(newWidth);
+    newHeight = Math.round(newHeight);
+
+    // Resize Canvas
+    doc.resizeCanvas(UnitValue(newWidth, "px"), UnitValue(newHeight, "px"), AnchorPosition.MIDDLECENTER);
+    alert("Resized to " + bestRatio.name + " (" + newWidth + "x" + newHeight + " px)");
 }
 
 
