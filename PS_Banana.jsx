@@ -217,6 +217,7 @@ function getAppDataFolder() {
 function loadJsonFile(fileName, defaultValue) {
     var file = new File(getConfigFolder().fsName + "/" + fileName);
     if (!file.exists) return defaultValue;
+    file.encoding = "UTF-8";
     file.open("r");
     var content = file.read();
     file.close();
@@ -229,6 +230,7 @@ function loadJsonFile(fileName, defaultValue) {
 
 function saveJsonFile(fileName, data) {
     var file = new File(getConfigFolder().fsName + "/" + fileName);
+    file.encoding = "UTF-8";
     file.open("w");
     file.write(JSON.stringify(data, null, 4));
     file.close();
