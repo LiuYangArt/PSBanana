@@ -1,11 +1,11 @@
 [
     {
-        "name": "Enhance Details",
+        "name": "增强细节",
         "prompt": "Enhance the details of this image, make it high resolution, 8k, realistic texture.",
         "mode": "file"
     },
     {
-        "name": "Remove Background",
+        "name": "去除背景",
         "prompt": "Remove the background, keep the subject only, white background.",
         "mode": "file"
     },
