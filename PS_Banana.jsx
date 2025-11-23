@@ -1,5 +1,9 @@
 #target photoshop
 
+// Author: LiuYang
+// Version: 1.0
+// Description: PSBanana
+
 // ============================================================================
 // Script Folder Path (Must be set before any other code)
 // ============================================================================
