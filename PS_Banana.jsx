@@ -170,6 +170,7 @@ var defaultSettings = {
     useJpeg: true,
     jpegQuality: 8,
     maxSize: 1024,
+    resolution: "1K",
     autoClose: false
 };
 
@@ -486,7 +487,7 @@ function showDialog() {
     pnlCanvas.margins = 10;
 
     pnlCanvas.add("statictext", undefined, "Nano Banana Pro Aspect Ratios:");
-    pnlCanvas.add("statictext", undefined, "1:1, 16:9, 9:16, 4:3, 21:9");
+    pnlCanvas.add("statictext", undefined, "1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 5:4, 4:5, 21:9");
 
     var btnSmartResize = pnlCanvas.add("button", undefined, "Smart Resize Canvas");
     btnSmartResize.preferredSize.width = 200;
@@ -586,13 +587,21 @@ function showDialog() {
     var txtQuality = grpQuality.add("edittext", undefined, settings.jpegQuality || 8);
     txtQuality.preferredSize.width = 50;
 
-    // Max Size
+    // Max Size (Input)
     var grpSize = tabSettings.add("group");
     grpSize.orientation = "row";
-    grpSize.add("statictext", undefined, "Max Size (px):");
+    grpSize.add("statictext", undefined, "Input Image Max Size (px):");
     var txtMaxSize = grpSize.add("edittext", undefined, settings.maxSize || 1024);
     txtMaxSize.preferredSize.width = 60;
-    grpSize.add("statictext", undefined, "(Resizes long edge if larger)");
+    grpSize.add("statictext", undefined, "(Images for AI to process)");
+
+    // Resolution (Output)
+    var grpRes = tabSettings.add("group");
+    grpRes.orientation = "row";
+    grpRes.add("statictext", undefined, "Output Resolution:");
+    var dropResolution = grpRes.add("dropdownlist", undefined, ["1K", "2K", "4K"]);
+    dropResolution.selection = (settings.resolution === "2K") ? 1 : ((settings.resolution === "4K") ? 2 : 0);
+
 
     // Toggle Quality input visibility based on Checkbox
     var updateQualityVisibility = function () {
@@ -785,6 +794,7 @@ function showDialog() {
         settings.useJpeg = chkJpeg.value;
         settings.jpegQuality = parseInt(txtQuality.text) || 8;
         settings.maxSize = parseInt(txtMaxSize.text) || 1024;
+        settings.resolution = dropResolution.selection.text;
         settings.autoClose = chkAutoClose.value;
         saveJsonFile(SETTINGS_FILE_NAME, settings);
         alert("Settings saved!");
@@ -1062,6 +1072,60 @@ function processGeneration(settings, promptText, options) {
                 responseModalities: ["image"]
             }
         };
+
+        // Calculate Aspect Ratio
+        var width = doc.width.as("px");
+        var height = doc.height.as("px");
+        var currentRatio = width / height;
+        var ratios = [
+            { name: "1:1", value: 1.0 },
+            { name: "16:9", value: 16 / 9 },
+            { name: "9:16", value: 9 / 16 },
+            { name: "4:3", value: 4 / 3 },
+            { name: "3:4", value: 3 / 4 },
+            { name: "3:2", value: 3 / 2 },
+            { name: "2:3", value: 2 / 3 },
+            { name: "5:4", value: 5 / 4 },
+            { name: "4:5", value: 4 / 5 },
+            { name: "21:9", value: 21 / 9 }
+        ];
+        var bestRatio = ratios[0];
+        var minDiff = Math.abs(currentRatio - bestRatio.value);
+        for (var r = 1; r < ratios.length; r++) {
+            var diff = Math.abs(currentRatio - ratios[r].value);
+            if (diff < minDiff) {
+                minDiff = diff;
+                bestRatio = ratios[r];
+            }
+        }
+        var aspectRatioStr = bestRatio.name;
+
+        // Add Resolution and Aspect Ratio to Payload
+        if (settings.provider === "OpenRouter" || settings.baseUrl.indexOf("openrouter") !== -1) {
+            // OpenRouter / OpenAI Compatible
+            payload.resolution = settings.resolution;
+            payload.aspect_ratio = aspectRatioStr;
+        } else {
+            // Google Gemini Native
+            if (!payload.generationConfig) payload.generationConfig = {};
+            payload.generationConfig.responseModalities = ["image"];
+            payload.generationConfig.image_config = {
+                aspect_ratio: aspectRatioStr,
+                image_size: settings.resolution
+            };
+        }
+
+        // Final Payload Structure Check
+        if (!payload.contents) {
+            // If OpenRouter, we might need to adjust structure if it wasn't set up correctly above?
+            // Wait, the OpenRouter block above (lines 860+) sets payload = {...}.
+            // The Gemini block sets payload = { contents: [...] }.
+            // My injection point is AFTER the Gemini block (line 1026-1033).
+            // So for Gemini, payload is already constructed.
+            // For OpenRouter, payload is already constructed.
+            // I can just modify `payload` here.
+        }
+
     }
 
     // 3. Write Payload to File
@@ -1631,6 +1695,11 @@ function smartResizeCanvas(doc) {
         { name: "16:9", value: 16 / 9 },
         { name: "9:16", value: 9 / 16 },
         { name: "4:3", value: 4 / 3 },
+        { name: "3:4", value: 3 / 4 },
+        { name: "3:2", value: 3 / 2 },
+        { name: "2:3", value: 2 / 3 },
+        { name: "5:4", value: 5 / 4 },
+        { name: "4:5", value: 4 / 5 },
         { name: "21:9", value: 21 / 9 }
     ];
 
