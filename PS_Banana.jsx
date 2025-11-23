@@ -946,23 +946,55 @@ function processGeneration(settings, promptText, options) {
 
         // 2. Handle Images based on Mode
         if (options && options.mode === "layer") {
-            // --- Layer Mode ---
+            // --- Layer Mode (Optimized Batch Export) ---
 
-            // Export Source Layers (Merged)
+            var groupsToExport = [];
+
+            // Prepare Source Group
             if (options.sourceLayers.length > 0) {
-                exportLayers(doc, options.sourceLayers, sourceImageFile, settings);
-                if (sourceImageFile.exists) {
-                    base64Source = encodeFileToBase64(sourceImageFile);
-                    if (!settings.debugMode) sourceImageFile.remove();
-                }
+                groupsToExport.push({ name: "source", layers: options.sourceLayers, file: sourceImageFile });
             }
 
-            // Export Reference Layers
+            // Prepare Reference Group
             if (options.refLayers.length > 0) {
-                exportLayers(doc, options.refLayers, refImageFile, settings);
-                if (refImageFile.exists) {
-                    base64Ref = encodeFileToBase64(refImageFile);
-                    if (!settings.debugMode) refImageFile.remove();
+                groupsToExport.push({ name: "ref", layers: options.refLayers, file: refImageFile });
+            }
+
+            if (groupsToExport.length > 0) {
+                // 1. Batch Export (Single Temp Doc)
+                // Disable Redraw for Speed
+                var originalRedraw = app.preferences.enableRedraw;
+                app.preferences.enableRedraw = false;
+
+                try {
+                    exportAllLayerGroups(doc, groupsToExport, settings);
+                } catch (e) {
+                    alert("Export Error: " + e.message);
+                } finally {
+                    app.preferences.enableRedraw = originalRedraw;
+                }
+
+                // 2. Batch Convert (Single PowerShell Call)
+                var exportedItems = [];
+                for (var i = 0; i < groupsToExport.length; i++) {
+                    if (groupsToExport[i].file.exists) {
+                        exportedItems.push({ name: groupsToExport[i].name, file: groupsToExport[i].file });
+                    }
+                }
+
+                var batchResults = batchConvertFiles(exportedItems, settings);
+
+                // 3. Map Results
+                for (var i = 0; i < batchResults.length; i++) {
+                    var res = batchResults[i];
+                    if (res.name === "source") base64Source = res.base64;
+                    if (res.name === "ref") base64Ref = res.base64;
+                }
+
+                // Cleanup
+                if (!settings.debugMode) {
+                    if (sourceImageFile.exists) sourceImageFile.remove();
+                    if (refImageFile.exists) refImageFile.remove();
                 }
             }
 
@@ -1347,24 +1379,33 @@ function saveBase64ToPng(b64String, outputFile) {
 
 // Helper: Encode file to Base64 string using certutil (Windows)
 function encodeFileToBase64(inputFile) {
-    var tempB64File = new File(Folder.temp.fsName + "/ps_ai_temp_encode.b64");
-    // certutil -f -encode input output (Force overwrite to prevent hang)
-    var cmd = 'certutil -f -encode "' + inputFile.fsName + '" "' + tempB64File.fsName + '"';
+    var tempFolder = getTempFolder();
+    var tempB64File = new File(tempFolder.fsName + "/temp_encode_" + new Date().getTime() + ".b64");
+    var psScriptFile = new File(tempFolder.fsName + "/temp_encode_script.ps1");
+
+    var scriptContent = "$b64 = [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes('" + inputFile.fsName + "'));\n";
+    scriptContent += "[System.IO.File]::WriteAllText('" + tempB64File.fsName + "', $b64);";
+
+    psScriptFile.open("w");
+    psScriptFile.write(scriptContent);
+    psScriptFile.close();
+
+    var cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + psScriptFile.fsName + '"';
     app.system(cmd);
 
-    if (!tempB64File.exists) return null;
-
-    tempB64File.open("r");
-    var b64Data = "";
-    // Read line by line to skip headers (-----BEGIN...)
-    while (!tempB64File.eof) {
-        var line = tempB64File.readln();
-        if (line.indexOf("-----") === -1) {
-            b64Data += line;
-        }
+    if (!tempB64File.exists) {
+        return null;
     }
+
+    // Read the entire file at once
+    tempB64File.open("r");
+    var b64Data = tempB64File.read();
     tempB64File.close();
+
+    // Cleanup
     tempB64File.remove();
+    psScriptFile.remove();
+
     return b64Data;
 }
 
@@ -1567,14 +1608,9 @@ function resizeDocIfNeeded(doc, maxSize) {
     }
 }
 
-function exportLayers(originalDoc, layersToKeep, file, settings) {
-    // New Method: Create Temp Doc -> Duplicate Layers into it -> Flatten -> Save
-    // This avoids "frontmost document" errors and history state issues.
-
-    // DEBUG
-    // alert("Exporting " + layersToKeep.length + " layers.");
-
-    var newDoc = app.documents.add(
+function exportAllLayerGroups(originalDoc, groupsToExport, settings) {
+    // Single Temp Doc Strategy
+    var tempDoc = app.documents.add(
         originalDoc.width,
         originalDoc.height,
         originalDoc.resolution,
@@ -1583,51 +1619,97 @@ function exportLayers(originalDoc, layersToKeep, file, settings) {
         DocumentFill.TRANSPARENT
     );
 
-    // FIX: Switch back to original doc so we can duplicate FROM it
-    app.activeDocument = originalDoc;
+    var emptyState = tempDoc.activeHistoryState;
 
-    try {
-        // Duplicate layers into new doc
-        var successCount = 0;
-        for (var i = 0; i < layersToKeep.length; i++) {
-            var layer = layersToKeep[i];
-            try {
-                // duplicate(targetDocument, elementPlacement)
-                // Note: duplicate() might not work if target doc is not open, but it is open.
-                // It requires source doc to be active.
-                var dupLayer = layer.duplicate(newDoc, ElementPlacement.PLACEATEND);
-                dupLayer.visible = true; // Ensure visible
-                successCount++;
-            } catch (e) {
-                // alert("Failed to duplicate layer '" + layer.name + "': " + e.message);
-            }
-        }
+    for (var g = 0; g < groupsToExport.length; g++) {
+        var layers = groupsToExport[g].layers;
+        var outFile = groupsToExport[g].file;
 
-        // Switch to new doc to flatten and save
-        app.activeDocument = newDoc;
+        if (!layers || layers.length === 0) continue;
 
-        // Flatten and Save
-        // If newDoc has no layers (empty selection), flatten might error or produce white.
-        if (newDoc.layers.length === 0) {
-            // Add a blank layer so flatten works
-            newDoc.artLayers.add();
-        }
-
-        newDoc.flatten();
-        resizeDocIfNeeded(newDoc, settings.maxSize);
-        saveImage(newDoc, file, settings);
-
-    } catch (e) {
-        alert("Export Error: " + e.message);
-    } finally {
-        // Ensure newDoc is closed if it exists and is open
-        try {
-            if (newDoc) newDoc.close(SaveOptions.DONOTSAVECHANGES);
-        } catch (e) { }
-
-        // Restore focus to original doc
+        // Switch to original doc to duplicate layers
         app.activeDocument = originalDoc;
+
+        // Duplicate layers to temp doc
+        for (var i = 0; i < layers.length; i++) {
+            try {
+                layers[i].duplicate(tempDoc, ElementPlacement.PLACEATEND);
+            } catch (e) { }
+        }
+
+        // Switch to temp doc
+        app.activeDocument = tempDoc;
+
+        if (tempDoc.layers.length === 0) {
+            tempDoc.artLayers.add();
+        }
+
+        tempDoc.flatten();
+        resizeDocIfNeeded(tempDoc, settings.maxSize);
+        saveImage(tempDoc, outFile, settings);
+
+        // Revert
+        tempDoc.activeHistoryState = emptyState;
     }
+
+    tempDoc.close(SaveOptions.DONOTSAVECHANGES);
+    app.activeDocument = originalDoc;
+}
+
+function batchConvertFiles(fileList, settings) {
+    if (fileList.length === 0) return [];
+
+    var startTime = new Date().getTime();
+    var tempFolder = getTempFolder();
+    var psScriptFile = new File(tempFolder.fsName + "/batch_convert.ps1");
+
+    // Construct PowerShell Script
+    var scriptContent = "$files = @(\n";
+    for (var i = 0; i < fileList.length; i++) {
+        var safePath = fileList[i].file.fsName.replace(/\\/g, "\\\\");
+        scriptContent += "    '" + safePath + "'";
+        if (i < fileList.length - 1) scriptContent += ",";
+        scriptContent += "\n";
+    }
+    scriptContent += ");\n\n";
+
+    scriptContent += "foreach ($f in $files) {\n";
+    scriptContent += "    if (Test-Path $f) {\n";
+    scriptContent += "        $b64 = [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($f));\n";
+    scriptContent += "        [System.IO.File]::WriteAllText($f + '.b64', $b64);\n";
+    scriptContent += "    }\n";
+    scriptContent += "}\n";
+
+    psScriptFile.open("w");
+    psScriptFile.write(scriptContent);
+    psScriptFile.close();
+
+    // Execute Single PowerShell Command
+    var cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + psScriptFile.fsName + '"';
+    app.system(cmd);
+
+    // Read Results
+    var results = [];
+    for (var i = 0; i < fileList.length; i++) {
+        var item = fileList[i];
+        var b64File = new File(item.file.fsName + ".b64");
+        if (b64File.exists) {
+            b64File.open("r");
+            var b64 = b64File.read();
+            b64File.close();
+            b64File.remove();
+            results.push({ name: item.name, file: item.file, base64: b64 });
+        }
+    }
+
+    psScriptFile.remove();
+
+    if (settings.debugMode) {
+        var duration = new Date().getTime() - startTime;
+        alert("Batch Base64 conversion took " + duration + "ms");
+    }
+
+    return results;
 }
 
 function expandLayerSet(layerSet) {
