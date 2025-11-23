@@ -174,8 +174,8 @@ var defaultSettings = {
 };
 
 var defaultPresets = [
-    { name: "Enhance Details", prompt: "Enhance the details of this image, make it high resolution, 8k, realistic texture." },
-    { name: "Remove Background", prompt: "Remove the background, keep the subject only, white background." }
+    { name: "Enhance Details", prompt: "Enhance the details of this image, make it high resolution, 8k, realistic texture.", mode: "file" },
+    { name: "Remove Background", prompt: "Remove the background, keep the subject only, white background.", mode: "file" }
 ];
 
 var defaultProviders = [
@@ -267,15 +267,19 @@ function showDialog() {
     grpPresets.orientation = "row";
     grpPresets.add("statictext", undefined, "Prompt Presets:");
     var dropPresets = grpPresets.add("dropdownlist", undefined, []);
-    dropPresets.preferredSize.width = 250;
+    dropPresets.preferredSize.width = 200;
 
     // Populate presets
     for (var i = 0; i < presets.length; i++) {
         dropPresets.add("item", presets[i].name);
     }
 
+    var btnAddPreset = grpPresets.add("button", undefined, "+");
+    btnAddPreset.preferredSize.width = 30;
     var btnSavePreset = grpPresets.add("button", undefined, "Save");
+    btnSavePreset.preferredSize.width = 50;
     var btnDeletePreset = grpPresets.add("button", undefined, "Del");
+    btnDeletePreset.preferredSize.width = 40;
 
     // Prompt Input
     tabGenerate.add("statictext", undefined, "Prompt:");
@@ -585,17 +589,47 @@ function showDialog() {
         if (dropPresets.selection) {
             var idx = dropPresets.selection.index;
             txtPrompt.text = presets[idx].prompt;
+
+            // Switch mode if present
+            if (presets[idx].mode) {
+                if (presets[idx].mode === "layer") {
+                    radLayer.value = true;
+                    radFile.value = false;
+                    radDirect.value = false;
+                } else if (presets[idx].mode === "direct") {
+                    radDirect.value = true;
+                    radFile.value = false;
+                    radLayer.value = false;
+                } else {
+                    radFile.value = true;
+                    radLayer.value = false;
+                    radDirect.value = false;
+                }
+                updateUI(); // Refresh layer panel visibility
+            }
         }
     };
 
-    btnSavePreset.onClick = function () {
+    btnAddPreset.onClick = function () {
         var name = prompt("Enter preset name:", "New Preset");
         if (name) {
-            presets.push({ name: name, prompt: txtPrompt.text });
+            var currentMode = radLayer.value ? "layer" : (radDirect.value ? "direct" : "file");
+            presets.push({ name: name, prompt: txtPrompt.text, mode: currentMode });
             saveJsonFile(PRESETS_FILE_NAME, presets);
             dropPresets.add("item", name);
             dropPresets.selection = dropPresets.items.length - 1;
         }
+    };
+
+    btnSavePreset.onClick = function () {
+        if (!dropPresets.selection) return;
+        var idx = dropPresets.selection.index;
+
+        presets[idx].prompt = txtPrompt.text;
+        presets[idx].mode = radLayer.value ? "layer" : (radDirect.value ? "direct" : "file");
+
+        saveJsonFile(PRESETS_FILE_NAME, presets);
+        alert("Preset saved!");
     };
 
     btnDeletePreset.onClick = function () {
