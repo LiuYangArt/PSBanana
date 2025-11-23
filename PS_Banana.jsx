@@ -505,6 +505,25 @@ function showDialog() {
         }
     };
 
+    var btnCreateGroups = pnlCanvas.add("button", undefined, "Create Source/Ref Groups");
+    btnCreateGroups.preferredSize.width = 200;
+    btnCreateGroups.helpTip = "Creates 'source' (Green) and 'reference' (Violet) groups if they don't exist.";
+
+    btnCreateGroups.onClick = function () {
+        try {
+            if (app.documents.length === 0) {
+                alert("No active document.");
+                return;
+            }
+            createSourceRefGroups(app.activeDocument);
+            alert("Groups checked/created successfully!");
+            // Refresh layer list if on layer tab
+            if (radLayer.value) loadLayers();
+        } catch (e) {
+            alert("Error creating groups: " + e.message);
+        }
+    };
+
     // --- Tab 2: Settings ---
     var tabSettings = tabs.add("tab", undefined, "Settings");
     tabSettings.orientation = "column";
@@ -1849,3 +1868,66 @@ function smartResizeCanvas(doc) {
 
 // Run
 showDialog();
+// Helper: Create Source and Reference Groups with Colors
+function createSourceRefGroups(doc) {
+    var sourceGroup = null;
+    var refGroup = null;
+
+    // Check existing top-level layers
+    for (var i = 0; i < doc.layers.length; i++) {
+        var layer = doc.layers[i];
+        if (layer.typename == "LayerSet") {
+            if (layer.name.toLowerCase() === "source") sourceGroup = layer;
+            if (layer.name.toLowerCase() === "reference") refGroup = layer;
+        }
+    }
+
+    // Create Source if missing
+    if (!sourceGroup) {
+        sourceGroup = doc.layerSets.add();
+        sourceGroup.name = "source";
+        // Move to top? Or just leave where created (usually top)
+    }
+    // Set Color to Green
+    setLayerColor(sourceGroup, "Green");
+
+    // Create Reference if missing
+    if (!refGroup) {
+        refGroup = doc.layerSets.add();
+        refGroup.name = "reference";
+    }
+    // Set Color to Violet
+    setLayerColor(refGroup, "Violet");
+}
+
+function setLayerColor(layer, colorName) {
+    try {
+        // Select the layer first
+        var doc = app.activeDocument;
+        doc.activeLayer = layer;
+
+        var colorCode = "None";
+        switch (colorName.toLowerCase()) {
+            case "red": colorCode = "Rd  "; break;
+            case "orange": colorCode = "Orng"; break;
+            case "yellow": colorCode = "Ylw "; break;
+            case "green": colorCode = "Grn "; break;
+            case "blue": colorCode = "Bl  "; break;
+            case "violet": colorCode = "Vlt "; break;
+            case "gray": colorCode = "Gry "; break;
+            case "none": colorCode = "None"; break;
+            default: return; // Unknown color
+        }
+
+        var desc = new ActionDescriptor();
+        var ref = new ActionReference();
+        ref.putEnumerated(charIDToTypeID("Lyr "), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
+        desc.putReference(charIDToTypeID("null"), ref);
+        var desc2 = new ActionDescriptor();
+        desc2.putEnumerated(charIDToTypeID("Clr "), charIDToTypeID("Clr "), charIDToTypeID(colorCode));
+        desc.putObject(charIDToTypeID("T   "), charIDToTypeID("Lyr "), desc2);
+        executeAction(charIDToTypeID("setd"), desc, DialogModes.NO);
+    } catch (e) {
+        alert("Error setting layer color (" + colorName + "): " + e.message);
+    }
+}
