@@ -195,6 +195,12 @@ var defaultProviders = [
         apiKey: "",
         baseUrl: "https://yunwu.zeabur.app/v1beta",
         model: "gemini-3-pro-image-preview"
+    },
+    {
+        name: "GPTGod NanoBanana Pro",
+        apiKey: "",
+        baseUrl: "https://api.gptgod.online/v1/chat/completions",
+        model: "gemini-3-pro-image-preview"
     }
 ];
 
