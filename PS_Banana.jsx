@@ -1934,10 +1934,13 @@ function exportAllLayerGroups(originalDoc, groupsToExport, settings) {
         // Switch to original doc to duplicate layers
         app.activeDocument = originalDoc;
 
-        // Duplicate layers to temp doc
+        // Duplicate layers to temp doc (only visible layers)
         for (var i = 0; i < layers.length; i++) {
             try {
-                layers[i].duplicate(tempDoc, ElementPlacement.PLACEATEND);
+                // Skip invisible layers
+                if (layers[i].visible) {
+                    layers[i].duplicate(tempDoc, ElementPlacement.PLACEATEND);
+                }
             } catch (e) { }
         }
 
