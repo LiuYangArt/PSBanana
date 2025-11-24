@@ -945,24 +945,8 @@ function processGeneration(settings, promptText, options) {
         "Content-Type: application/json; charset=utf-8"
     ];
 
-    if (settings.provider === "OpenRouter" || settings.baseUrl.indexOf("openrouter") !== -1) {
-        // OpenRouter / OpenAI Compatible
-        if (apiUrl.indexOf("/images/generations") === -1) {
-            if (apiUrl.slice(-1) !== "/") apiUrl += "/";
-            apiUrl += "images/generations";
-        }
 
-        headers.push("Authorization: Bearer " + settings.apiKey);
-        headers.push("HTTP-Referer: https://github.com/antigravity/ps-plugin");
-        headers.push("X-Title: Photoshop AI Plugin");
-
-        payload = {
-            prompt: promptText,
-            model: settings.model,
-            response_format: "b64_json",
-            n: 1
-        };
-    } else if (settings.provider === "GPTGod NanoBanana Pro" || settings.baseUrl.indexOf("gptgod") !== -1) {
+    if (settings.provider === "GPTGod NanoBanana Pro" || settings.baseUrl.indexOf("gptgod") !== -1) {
         // GPT God (OpenAI Compatible but returns URL)
         apiUrl = settings.baseUrl;
         headers.push("Authorization: Bearer " + settings.apiKey);
@@ -1301,28 +1285,18 @@ function processGeneration(settings, promptText, options) {
         var aspectRatioStr = bestRatio.name;
 
         // Add Resolution and Aspect Ratio to Payload
-        if (settings.provider === "OpenRouter" || settings.baseUrl.indexOf("openrouter") !== -1) {
-            // OpenRouter / OpenAI Compatible
-            payload.resolution = settings.resolution;
-            payload.aspect_ratio = aspectRatioStr;
-        } else {
-            // Google Gemini Native
-            if (!payload.generationConfig) payload.generationConfig = {};
-            payload.generationConfig.responseModalities = ["image"];
-            payload.generationConfig.image_config = {
-                aspect_ratio: aspectRatioStr,
-                image_size: settings.resolution
-            };
-        }
+
+        // Google Gemini Native
+        if (!payload.generationConfig) payload.generationConfig = {};
+        payload.generationConfig.responseModalities = ["image"];
+        payload.generationConfig.image_config = {
+            aspect_ratio: aspectRatioStr,
+            image_size: settings.resolution
+        };
 
         // Final Payload Structure Check
         if (!payload.contents) {
-            // If OpenRouter, we might need to adjust structure if it wasn't set up correctly above?
-            // Wait, the OpenRouter block above (lines 860+) sets payload = {...}.
-            // The Gemini block sets payload = { contents: [...] }.
-            // My injection point is AFTER the Gemini block (line 1026-1033).
-            // So for Gemini, payload is already constructed.
-            // For OpenRouter, payload is already constructed.
+
             // I can just modify `payload` here.
         }
 
@@ -1737,10 +1711,6 @@ function testApiConnection(settings) {
     } else if (settings.provider === "Yunwu Gemini") {
         // Test by listing models or simple check
         apiUrl = settings.baseUrl + "/models?key=" + settings.apiKey;
-    } else if (settings.provider === "OpenRouter") {
-        // OpenRouter Auth Check
-        apiUrl = "https://openrouter.ai/api/v1/auth/key";
-        headers.push("Authorization: Bearer " + settings.apiKey);
     } else if (settings.provider === "GPTGod NanoBanana Pro" || settings.baseUrl.indexOf("gptgod") !== -1) {
         // GPT God
         // Base URL might be .../chat/completions, we want .../models
@@ -1793,11 +1763,6 @@ function testApiConnection(settings) {
         } else if (settings.provider === "Yunwu Gemini") {
             if (json.models) return { success: true, message: "Yunwu Gemini API Key is valid." };
             if (json.error) return { success: false, message: json.error.message };
-        } else if (settings.provider === "OpenRouter") {
-            if (json.data && json.data.limit) return { success: true, message: "OpenRouter Key Valid. Limit: " + json.data.limit }; // auth/key returns usage info
-            if (json.error) return { success: false, message: json.error.message };
-            // Fallback if using models endpoint
-            if (json.data) return { success: true, message: "OpenRouter/Custom API reachable." };
         } else {
             if (json.data || json.models) return { success: true, message: "Custom API reachable." };
             if (json.error) return { success: false, message: json.error.message };
