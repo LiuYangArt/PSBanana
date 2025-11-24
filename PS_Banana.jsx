@@ -164,7 +164,6 @@ if (typeof JSON !== 'object') {
 var SETTINGS_FILE_NAME = "PS_Banana_Settings.json";
 var PRESETS_FILE_NAME = "PS_Banana_Presets.json";
 var PROVIDERS_FILE_NAME = "PS_Banana_Providers.json";
-var HISTORY_FILE_NAME = "PS_Banana_History.json";
 
 var defaultSettings = {
     provider: "Google Gemini",
@@ -300,20 +299,9 @@ function showDialog() {
     var txtPrompt = tabGenerate.add("edittext", undefined, "", { multiline: true, scrolling: true });
     txtPrompt.preferredSize.height = 150;
 
-    // Toggles Group (Search & Chat)
-    var grpToggles = tabGenerate.add("group");
-    grpToggles.orientation = "row";
-    grpToggles.alignChildren = ["left", "center"];
-
     // Search Web Toggle
-    var chkSearch = grpToggles.add("checkbox", undefined, "Search Web");
+    var chkSearch = tabGenerate.add("checkbox", undefined, "Search Web (Grounding)");
     chkSearch.value = false;
-    chkSearch.helpTip = "Enable Grounding (Google Search) for up-to-date information.";
-
-    // Chat Mode Toggle
-    var chkChatMode = grpToggles.add("checkbox", undefined, "Chat Mode");
-    chkChatMode.value = false;
-    chkChatMode.helpTip = "Enable multi-turn chat context (History).";
 
     // Generate Button
     var btnGenerate = tabGenerate.add("button", undefined, "Generate Image");
@@ -898,7 +886,6 @@ function showDialog() {
             var generationOptions = {
                 mode: radDirect.value ? "direct" : (radFile.value ? "file" : "layer"),
                 searchMode: chkSearch.value,
-                chatMode: chkChatMode.value,
                 sourceLayers: [],
                 refLayers: []
             };
@@ -1294,28 +1281,10 @@ function processGeneration(settings, promptText, options, statusLabel) {
             });
         }
 
-        var currentUserContent = {
-            role: "user",
-            parts: parts
-        };
-
-        var requestContents = [currentUserContent];
-
-        // Handle Chat Mode History
-        if (options && options.chatMode) {
-            try {
-                var history = loadJsonFile(HISTORY_FILE_NAME, []);
-                // Validate history format (basic check)
-                if (history instanceof Array) {
-                    requestContents = history.concat([currentUserContent]);
-                }
-            } catch (e) {
-                // Ignore history load errors, proceed with current message
-            }
-        }
-
         payload = {
-            contents: requestContents,
+            contents: [{
+                parts: parts
+            }],
             generationConfig: {
                 responseModalities: ["image"]
             }
@@ -1546,45 +1515,6 @@ function processGeneration(settings, promptText, options, statusLabel) {
             }
             updateStatus("Decoding image...");
             saveBase64ToPng(b64Data, resultImageFile);
-
-            // Save Chat History (if enabled and successful)
-            if (options && options.chatMode && response.candidates && response.candidates.length > 0) {
-                try {
-                    var history = loadJsonFile(HISTORY_FILE_NAME, []);
-                    // Append User Message (reconstruct from payload to be safe, or use what we sent)
-                    // We need to be careful not to save extremely large base64 strings if we can avoid it, 
-                    // but for context we might need them. 
-                    // For now, let's save the full turn.
-
-                    // We need to reconstruct the user content exactly as sent
-                    // We can't easily access 'currentUserContent' here due to scope, 
-                    // but we can reconstruct it or pass it down?
-                    // Actually, we can just read the payload file we wrote!
-                    // Or better, since we are in the same function scope, we CAN access 'currentUserContent' 
-                    // IF we defined it in the outer scope or if this block is in the same scope.
-                    // Looking at the code, 'currentUserContent' was defined inside the 'else' block (Gemini API).
-                    // This response handling block is AFTER the 'if/else' provider block.
-                    // So 'currentUserContent' is NOT accessible here directly.
-
-                    // However, we have 'payload' variable which holds the request.
-                    if (payload && payload.contents) {
-                        var lastUserMsg = payload.contents[payload.contents.length - 1];
-                        history.push(lastUserMsg);
-
-                        // Append Model Response
-                        var modelContent = response.candidates[0].content;
-                        // Ensure role is set
-                        if (!modelContent.role) modelContent.role = "model";
-                        history.push(modelContent);
-
-                        saveJsonFile(HISTORY_FILE_NAME, history);
-                    }
-                } catch (e) {
-                    // Ignore history save errors
-                    if (settings.debugMode) alert("History Save Error: " + e.message);
-                }
-            }
-
         } catch (e) {
             alert("Failed to decode/save image: " + e.message);
             return;
