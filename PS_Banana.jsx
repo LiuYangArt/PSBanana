@@ -299,6 +299,10 @@ function showDialog() {
     var txtPrompt = tabGenerate.add("edittext", undefined, "", { multiline: true, scrolling: true });
     txtPrompt.preferredSize.height = 150;
 
+    // Search Web Toggle
+    var chkSearch = tabGenerate.add("checkbox", undefined, "Search Web (Grounding)");
+    chkSearch.value = false;
+
     // Generate Button
     var btnGenerate = tabGenerate.add("button", undefined, "Generate Image");
     btnGenerate.preferredSize.height = 40;
@@ -643,11 +647,20 @@ function showDialog() {
 
     var btnSaveSettings = tabSettings.add("button", undefined, "Save Settings");
 
-    // Footer (Close Button)
+    // Footer (Status Bar & Close Button)
     var grpFooter = win.add("group");
     grpFooter.orientation = "row";
-    grpFooter.alignChildren = ["right", "center"];
+    grpFooter.alignChildren = ["fill", "center"];
     grpFooter.alignment = ["fill", "bottom"];
+
+    // Status Bar
+    var pnlStatus = grpFooter.add("panel");
+    pnlStatus.alignment = ["fill", "center"];
+    pnlStatus.preferredSize.height = 30;
+    var lblStatus = pnlStatus.add("statictext", undefined, "Ready");
+    lblStatus.alignment = ["fill", "center"];
+
+    // Close Button
     var btnClose = grpFooter.add("button", undefined, "Close");
     btnClose.preferredSize.width = 100;
 
@@ -872,6 +885,7 @@ function showDialog() {
         try {
             var generationOptions = {
                 mode: radDirect.value ? "direct" : (radFile.value ? "file" : "layer"),
+                searchMode: chkSearch.value,
                 sourceLayers: [],
                 refLayers: []
             };
@@ -885,7 +899,7 @@ function showDialog() {
                 generationOptions.refLayers = selectedRefLayers;
             }
 
-            processGeneration(settings, txtPrompt.text, generationOptions);
+            processGeneration(settings, txtPrompt.text, generationOptions, lblStatus);
 
             // Auto-close if enabled
             if (settings.autoClose) {
@@ -904,7 +918,20 @@ function showDialog() {
 // Core Logic
 // ============================================================================
 
-function processGeneration(settings, promptText, options) {
+function processGeneration(settings, promptText, options, statusLabel) {
+    var updateStatus = function (msg) {
+        if (statusLabel) {
+            statusLabel.text = msg;
+            // Force UI update
+            try {
+                var win = statusLabel.window;
+                if (win) win.update();
+            } catch (e) { }
+            app.refresh();
+        }
+    };
+
+    updateStatus("Initializing...");
     var doc;
     try {
         doc = app.activeDocument;
@@ -973,6 +1000,7 @@ function processGeneration(settings, promptText, options) {
         var savedState = doc.activeHistoryState;
         if (hasSelection(doc)) {
             createMaskLayer(doc);
+            updateStatus("Exporting mask...");
             exportImage(doc, maskImageFile, settings);
             base64Mask = encodeFileToBase64(maskImageFile);
             doc.activeHistoryState = savedState;
@@ -990,6 +1018,7 @@ function processGeneration(settings, promptText, options) {
                 var originalRedraw = app.preferences.enableRedraw;
                 app.preferences.enableRedraw = false;
                 try {
+                    updateStatus("Exporting layer groups...");
                     exportAllLayerGroups(doc, groupsToExport, settings);
                 } catch (e) {
                     alert("Export Error: " + e.message);
@@ -1022,6 +1051,7 @@ function processGeneration(settings, promptText, options) {
 
         } else {
             // File Mode
+            updateStatus("Exporting image...");
             exportImage(doc, sourceImageFile, settings);
             base64Source = encodeFileToBase64(sourceImageFile);
             if (!settings.debugMode) sourceImageFile.remove();
@@ -1086,6 +1116,7 @@ function processGeneration(settings, promptText, options) {
 
         if (hasSelection(doc)) {
             createMaskLayer(doc);
+            updateStatus("Exporting mask...");
             exportImage(doc, maskImageFile, settings);
             base64Mask = encodeFileToBase64(maskImageFile);
 
@@ -1119,6 +1150,7 @@ function processGeneration(settings, promptText, options) {
                 app.preferences.enableRedraw = false;
 
                 try {
+                    updateStatus("Exporting layer groups...");
                     exportAllLayerGroups(doc, groupsToExport, settings);
                 } catch (e) {
                     alert("Export Error: " + e.message);
@@ -1179,6 +1211,7 @@ function processGeneration(settings, promptText, options) {
 
         } else {
             // --- File Mode (Default) ---
+            updateStatus("Exporting image...");
             exportImage(doc, sourceImageFile, settings);
             base64Source = encodeFileToBase64(sourceImageFile);
             if (!settings.debugMode) sourceImageFile.remove();
@@ -1257,6 +1290,13 @@ function processGeneration(settings, promptText, options) {
             }
         };
 
+        // Add Search Tool if enabled
+        if (options && options.searchMode) {
+            payload.tools = [
+                { "google_search": {} }
+            ];
+        }
+
         // Calculate Aspect Ratio
         var width = doc.width.as("px");
         var height = doc.height.as("px");
@@ -1317,6 +1357,7 @@ function processGeneration(settings, promptText, options) {
     curlCmd += ' -o "' + responseFile.fsName + '"';
 
     // 5. Execute
+    updateStatus("Sending request to AI provider... (Please wait)");
     app.system(curlCmd);
 
     // Debug Logging
@@ -1341,6 +1382,7 @@ function processGeneration(settings, promptText, options) {
 
     // 6. Parse Response
     if (!responseFile.exists) {
+        updateStatus("Error: API call failed.");
         alert("API call failed. No response file created.");
         return;
     }
@@ -1351,6 +1393,7 @@ function processGeneration(settings, promptText, options) {
     responseFile.close();
 
     if (responseText === "") {
+        updateStatus("Error: Empty response.");
         alert("API returned an empty response.");
         return;
     }
@@ -1358,6 +1401,7 @@ function processGeneration(settings, promptText, options) {
     // alert("Response size: " + responseText.length);
 
     var response;
+    updateStatus("Processing response...");
     try {
         response = JSON.parse(responseText);
         // alert("JSON Parsed successfully.");
@@ -1393,6 +1437,7 @@ function processGeneration(settings, promptText, options) {
     if (imageUrl) {
         if (settings.debugMode) alert("Image URL found: " + imageUrl);
         try {
+            updateStatus("Downloading image...");
             downloadImage(imageUrl, resultImageFile);
             // If download successful, we don't need b64Data, we just proceed to import
             if (resultImageFile.exists && resultImageFile.length > 0) {
@@ -1450,6 +1495,7 @@ function processGeneration(settings, promptText, options) {
 
         if (!b64Data) {
             if (response.error) {
+                updateStatus("Error: " + (response.error.message || "API Error"));
                 alert("API Error:\nCode: " + (response.error.code || "Unknown") + "\nMessage: " + response.error.message);
             } else {
                 alert("Unexpected Response (No image found):\n" + JSON.stringify(response, null, 2));
@@ -1467,6 +1513,7 @@ function processGeneration(settings, promptText, options) {
             if (settings.debugMode) {
                 alert("Saving result image to: " + resultImageFile.fsName);
             }
+            updateStatus("Decoding image...");
             saveBase64ToPng(b64Data, resultImageFile);
         } catch (e) {
             alert("Failed to decode/save image: " + e.message);
@@ -1481,7 +1528,9 @@ function processGeneration(settings, promptText, options) {
                 if (settings.debugMode) {
                     alert("Placing image... Size: " + resultImageFile.length);
                 }
+                updateStatus("Importing to Photoshop...");
                 placeImage(doc, resultImageFile);
+                updateStatus("Done!");
                 app.refresh(); // Force UI update
 
                 // Keep the file for debugging - will be cleaned up on next generation
