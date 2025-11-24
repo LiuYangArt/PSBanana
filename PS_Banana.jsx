@@ -956,6 +956,127 @@ function processGeneration(settings, promptText, options) {
             response_format: "b64_json",
             n: 1
         };
+    } else if (settings.provider === "GPTGod NanoBanana Pro" || settings.baseUrl.indexOf("gptgod") !== -1) {
+        // GPT God (OpenAI Compatible but returns URL)
+        apiUrl = settings.baseUrl;
+        headers.push("Authorization: Bearer " + settings.apiKey);
+
+        // Prepare Images for Vision Model
+        var messages = [];
+        var userContent = [];
+
+        // Add Text Prompt
+        userContent.push({ type: "text", text: promptText });
+
+        // Handle Images (Mask, Source, Ref)
+        // Note: GPT God might expect standard OpenAI Vision format
+
+        var maskImageFile = new File(tempFolder.fsName + "/ps_ai_mask" + ext);
+        var sourceImageFile = new File(tempFolder.fsName + "/ps_ai_source" + ext);
+        var refImageFile = new File(tempFolder.fsName + "/ps_ai_ref" + ext);
+
+        var base64Mask = null;
+        var base64Source = null;
+        var base64Ref = null;
+
+        // 1. Handle Mask
+        var savedState = doc.activeHistoryState;
+        if (hasSelection(doc)) {
+            createMaskLayer(doc);
+            exportImage(doc, maskImageFile, settings);
+            base64Mask = encodeFileToBase64(maskImageFile);
+            doc.activeHistoryState = savedState;
+            if (maskImageFile.exists && !settings.debugMode) maskImageFile.remove();
+        }
+
+        // 2. Handle Images based on Mode
+        if (options && options.mode === "layer") {
+            // --- Layer Mode (Optimized Batch Export) ---
+            var groupsToExport = [];
+            if (options.sourceLayers.length > 0) groupsToExport.push({ name: "source", layers: options.sourceLayers, file: sourceImageFile });
+            if (options.refLayers.length > 0) groupsToExport.push({ name: "ref", layers: options.refLayers, file: refImageFile });
+
+            if (groupsToExport.length > 0) {
+                var originalRedraw = app.preferences.enableRedraw;
+                app.preferences.enableRedraw = false;
+                try {
+                    exportAllLayerGroups(doc, groupsToExport, settings);
+                } catch (e) {
+                    alert("Export Error: " + e.message);
+                } finally {
+                    app.preferences.enableRedraw = originalRedraw;
+                }
+
+                var exportedItems = [];
+                for (var i = 0; i < groupsToExport.length; i++) {
+                    if (groupsToExport[i].file.exists) exportedItems.push({ name: groupsToExport[i].name, file: groupsToExport[i].file });
+                }
+
+                var batchResults = batchConvertFiles(exportedItems, settings);
+                for (var i = 0; i < batchResults.length; i++) {
+                    var res = batchResults[i];
+                    if (res.name === "source") base64Source = res.base64;
+                    if (res.name === "ref") base64Ref = res.base64;
+                }
+                if (!settings.debugMode) {
+                    if (sourceImageFile.exists) sourceImageFile.remove();
+                    if (refImageFile.exists) refImageFile.remove();
+                }
+            }
+        } else if (options && options.mode === "direct") {
+            // Direct Mode - No input image (unless mask?)
+            // Add canvas size info to prompt
+            var canvasWidth = Math.round(doc.width.as("px"));
+            var canvasHeight = Math.round(doc.height.as("px"));
+            userContent[0].text = "Generate an image with dimensions " + canvasWidth + "x" + canvasHeight + " pixels. " + promptText;
+
+        } else {
+            // File Mode
+            exportImage(doc, sourceImageFile, settings);
+            base64Source = encodeFileToBase64(sourceImageFile);
+            if (!settings.debugMode) sourceImageFile.remove();
+        }
+
+        // Add Images to Content
+        if (base64Mask) {
+            userContent.push({
+                type: "image_url",
+                image_url: {
+                    url: "data:image/jpeg;base64," + base64Mask
+                }
+            });
+            userContent[0].text += "\n[Attached Image 1: Mask]";
+        }
+        if (base64Source) {
+            userContent.push({
+                type: "image_url",
+                image_url: {
+                    url: "data:image/jpeg;base64," + base64Source
+                }
+            });
+            userContent[0].text += "\n[Attached Image " + (base64Mask ? "2" : "1") + ": Source]";
+        }
+        if (base64Ref) {
+            userContent.push({
+                type: "image_url",
+                image_url: {
+                    url: "data:image/jpeg;base64," + base64Ref
+                }
+            });
+            userContent[0].text += "\n[Attached Image " + (base64Mask ? (base64Source ? "3" : "2") : (base64Source ? "2" : "1")) + ": Reference]";
+        }
+
+        payload = {
+            model: settings.model,
+            messages: [
+                {
+                    role: "user",
+                    content: userContent
+                }
+            ],
+            stream: false
+        };
+
     } else {
         // Gemini API (Default for Google Gemini, Yunwu Gemini, and Custom)
         // Supports Images and Masks
@@ -1266,75 +1387,111 @@ function processGeneration(settings, promptText, options) {
         return;
     }
 
-    // 7. Extract Image Data (Base64)
+    // 7. Extract Image Data (Base64 or URL)
     var b64Data = null;
+    var imageUrl = null;
 
-    // Try Gemini structure first (candidates)
-    // Try Gemini structure first (candidates)
-    if (response.candidates && response.candidates.length > 0) {
-        var parts = response.candidates[0].content.parts;
-        for (var i = 0; i < parts.length; i++) {
-            if (parts[i].inlineData && parts[i].inlineData.data) {
-                b64Data = parts[i].inlineData.data;
-                break;
-            } else if (parts[i].text) {
-                // Check if text contains base64 image (Markdown or raw)
-                var txt = parts[i].text;
+    // Check for URL (GPT God / OpenAI URL mode)
+    if (response.image) imageUrl = response.image;
+    else if (response.images && response.images.length > 0) imageUrl = response.images[0];
+    else if (response.data && response.data.length > 0 && response.data[0].url) imageUrl = response.data[0].url;
 
-                // Look for data URI pattern
-                var dataIdx = txt.indexOf("data:image");
-                if (dataIdx !== -1) {
-                    var commaIdx = txt.indexOf(",", dataIdx);
-                    if (commaIdx !== -1) {
-                        var rawB64 = txt.substring(commaIdx + 1);
-                        // If inside markdown ![...](...), it ends with )
-                        var endIdx = rawB64.indexOf(")");
-                        if (endIdx !== -1) {
-                            b64Data = rawB64.substring(0, endIdx);
-                        } else {
-                            b64Data = rawB64;
-                        }
-                        // Clean whitespace
-                        b64Data = b64Data.replace(/\s/g, "");
-                        break;
-                    }
-                } else if (txt.length > 1000 && txt.indexOf("{") === -1) {
-                    // Assume raw base64 if long and doesn't look like JSON
-                    b64Data = txt.replace(/\s/g, "");
-                    break;
-                }
+    // Check for URL in content (Markdown)
+    if (!imageUrl && response.choices && response.choices.length > 0) {
+        var content = response.choices[0].message.content;
+        if (typeof content === 'string') {
+            var match = content.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
+            if (match) imageUrl = match[1];
+            else {
+                match = content.match(/(https?:\/\/[^\s]+\.(png|jpg|jpeg|webp|gif))/i);
+                if (match) imageUrl = match[1];
             }
         }
     }
 
-    // If not found, try OpenAI structure (data[0].b64_json)
-    if (!b64Data && response.data && response.data.length > 0 && response.data[0].b64_json) {
-        b64Data = response.data[0].b64_json;
-    }
-
-    if (!b64Data) {
-        if (response.error) {
-            alert("API Error:\nCode: " + (response.error.code || "Unknown") + "\nMessage: " + response.error.message);
-        } else {
-            alert("Unexpected Response (No image found):\n" + JSON.stringify(response, null, 2));
+    // If URL found, download it
+    if (imageUrl) {
+        if (settings.debugMode) alert("Image URL found: " + imageUrl);
+        try {
+            downloadImage(imageUrl, resultImageFile);
+            // If download successful, we don't need b64Data, we just proceed to import
+            if (resultImageFile.exists && resultImageFile.length > 0) {
+                // Skip b64 decoding step
+            } else {
+                alert("Failed to download image from URL.");
+                return;
+            }
+        } catch (e) {
+            alert("Download Error: " + e.message);
+            return;
         }
-        return;
-    }
+    } else {
+        // Try Gemini structure first (candidates)
+        if (response.candidates && response.candidates.length > 0) {
+            var parts = response.candidates[0].content.parts;
+            for (var i = 0; i < parts.length; i++) {
+                if (parts[i].inlineData && parts[i].inlineData.data) {
+                    b64Data = parts[i].inlineData.data;
+                    break;
+                } else if (parts[i].text) {
+                    // Check if text contains base64 image (Markdown or raw)
+                    var txt = parts[i].text;
 
-    // DEBUG: Check Base64 Data
-    if (settings.debugMode) {
-        alert("Base64 Data Extracted. Length: " + b64Data.length);
-    }
+                    // Look for data URI pattern
+                    var dataIdx = txt.indexOf("data:image");
+                    if (dataIdx !== -1) {
+                        var commaIdx = txt.indexOf(",", dataIdx);
+                        if (commaIdx !== -1) {
+                            var rawB64 = txt.substring(commaIdx + 1);
+                            // If inside markdown ![...](...), it ends with )
+                            var endIdx = rawB64.indexOf(")");
+                            if (endIdx !== -1) {
+                                b64Data = rawB64.substring(0, endIdx);
+                            } else {
+                                b64Data = rawB64;
+                            }
+                            // Clean whitespace
+                            b64Data = b64Data.replace(/\s/g, "");
+                            break;
+                        }
+                    } else if (txt.length > 1000 && txt.indexOf("{") === -1) {
+                        // Assume raw base64 if long and doesn't look like JSON
+                        b64Data = txt.replace(/\s/g, "");
+                        break;
+                    }
+                }
+            }
+        }
 
-    // 8. Save Base64 to PNG
-    try {
+        // If not found, try OpenAI structure (data[0].b64_json)
+        if (!b64Data && response.data && response.data.length > 0 && response.data[0].b64_json) {
+            b64Data = response.data[0].b64_json;
+        }
+
+        if (!b64Data) {
+            if (response.error) {
+                alert("API Error:\nCode: " + (response.error.code || "Unknown") + "\nMessage: " + response.error.message);
+            } else {
+                alert("Unexpected Response (No image found):\n" + JSON.stringify(response, null, 2));
+            }
+            return;
+        }
+
+        // DEBUG: Check Base64 Data
         if (settings.debugMode) {
-            alert("Saving result image to: " + resultImageFile.fsName);
+            alert("Base64 Data Extracted. Length: " + b64Data.length);
         }
-        saveBase64ToPng(b64Data, resultImageFile);
-    } catch (e) {
-        alert("Failed to decode/save image: " + e.message);
-        return;
+
+        // 8. Save Base64 to PNG
+        try {
+            if (settings.debugMode) {
+                alert("Saving result image to: " + resultImageFile.fsName);
+            }
+            saveBase64ToPng(b64Data, resultImageFile);
+        } catch (e) {
+            alert("Failed to decode/save image: " + e.message);
+            return;
+        }
     }
 
     // 9. Import to Photoshop
@@ -1450,6 +1607,21 @@ function encodeFileToBase64(inputFile) {
     return b64Data;
 }
 
+// Helper: Download image from URL
+function downloadImage(url, outputFile) {
+    if (outputFile.exists) outputFile.remove();
+
+    // Use curl to download
+    // -L to follow redirects
+    var cmd = 'curl -L "' + url + '" -o "' + outputFile.fsName + '"';
+
+    app.system(cmd);
+
+    if (!outputFile.exists) {
+        throw new Error("Download failed: Output file not created.");
+    }
+}
+
 // Helper: Place image into document
 function placeImage(doc, file) {
     var targetWidth = doc.width;
@@ -1563,11 +1735,25 @@ function testApiConnection(settings) {
         // OpenRouter Auth Check
         apiUrl = "https://openrouter.ai/api/v1/auth/key";
         headers.push("Authorization: Bearer " + settings.apiKey);
+    } else if (settings.provider === "GPTGod NanoBanana Pro" || settings.baseUrl.indexOf("gptgod") !== -1) {
+        // GPT God
+        // Base URL might be .../chat/completions, we want .../models
+        apiUrl = settings.baseUrl;
+        if (apiUrl.indexOf("/chat/completions") !== -1) {
+            apiUrl = apiUrl.replace("/chat/completions", "/models");
+        } else {
+            // Fallback if they just put root v1
+            if (apiUrl.slice(-1) !== "/") apiUrl += "/";
+            apiUrl += "models";
+        }
+        headers.push("Authorization: Bearer " + settings.apiKey);
     } else {
         // Custom: We don't know the auth check endpoint.
         // Try a generic GET /models if they follow OpenAI standard, otherwise just return warning.
         if (settings.baseUrl.indexOf("v1") !== -1) {
             apiUrl = settings.baseUrl;
+            // Attempt to strip chat/completions if present to find root
+            apiUrl = apiUrl.replace("/chat/completions", "");
             if (apiUrl.slice(-1) !== "/") apiUrl += "/";
             apiUrl += "models";
         } else {
