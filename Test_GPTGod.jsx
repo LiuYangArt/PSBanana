@@ -128,7 +128,7 @@ function showDialog() {
         var url = "https://api.gptgod.online/v1/chat/completions";
 
         // 根据参考代码添加指令
-        var finalPrompt = prompt + "\n请生成 1 张图片。";
+        var finalPrompt = prompt + "\nGenerate 1 image.";
 
         var payload = {
             model: model,
