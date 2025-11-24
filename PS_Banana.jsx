@@ -317,6 +317,8 @@ function showDialog() {
     var radFile = pnlMode.add("radiobutton", undefined, "File Mode (Merge All)");
     var radLayer = pnlMode.add("radiobutton", undefined, "Layer Mode (Selected Layers)");
     var radDirect = pnlMode.add("radiobutton", undefined, "Direct Mode (Text To Image)");
+    var chkUseLastResult = pnlMode.add("checkbox", undefined, "Use Last Result as Input");
+    chkUseLastResult.visible = false; // Hidden by default, shown when Direct Mode is active
     radFile.value = true;
 
     // Layer Selection Panel
@@ -453,7 +455,11 @@ function showDialog() {
     var updateUI = function () {
         var isLayer = radLayer.value;
         pnlLayers.enabled = isLayer;
+        pnlLayers.enabled = isLayer;
         pnlLayers.visible = isLayer;
+
+        // Show/Hide "Use Last Result" based on Direct Mode
+        chkUseLastResult.visible = radDirect.value;
     };
 
     btnRefresh.onClick = loadLayers;
@@ -886,6 +892,7 @@ function showDialog() {
             var generationOptions = {
                 mode: radDirect.value ? "direct" : (radFile.value ? "file" : "layer"),
                 searchMode: chkSearch.value,
+                useLastResult: chkUseLastResult.value,
                 sourceLayers: [],
                 refLayers: []
             };
@@ -945,10 +952,30 @@ function processGeneration(settings, promptText, options, statusLabel) {
     var tempFolder = getTempFolder();
 
     // Clean up old result files from previous generations
+    // Clean up old result files from previous generations
+    // BUT if useLastResult is true, we need to find the LATEST one first
+    var lastResultFile = null;
     var oldResults = tempFolder.getFiles("ps_ai_result_*.png");
+
+    if (options && options.useLastResult && options.mode === "direct") {
+        // Find the latest file
+        if (oldResults && oldResults.length > 0) {
+            // Sort by name (timestamp is in name) or modified date
+            // Since name is ps_ai_result_TIMESTAMP.png, alphabetical sort works for finding latest if timestamp is fixed length, 
+            // but timestamp length might vary slightly? Actually Date.getTime() is monotonic.
+            // Let's sort by modified date to be safe.
+            oldResults.sort(function (a, b) { return b.modified - a.modified; });
+            lastResultFile = oldResults[0];
+        }
+    }
+
     if (oldResults) {
         for (var i = 0; i < oldResults.length; i++) {
             try {
+                // If this is the file we want to keep, skip deletion
+                if (lastResultFile && oldResults[i].fsName === lastResultFile.fsName) {
+                    continue;
+                }
                 oldResults[i].remove();
             } catch (e) {
                 // Ignore errors if file is locked or doesn't exist
@@ -1048,6 +1075,19 @@ function processGeneration(settings, promptText, options, statusLabel) {
             var canvasWidth = Math.round(doc.width.as("px"));
             var canvasHeight = Math.round(doc.height.as("px"));
             userContent[0].text = "Generate an image with dimensions " + canvasWidth + "x" + canvasHeight + " pixels. " + promptText;
+
+            if (options.useLastResult && lastResultFile && lastResultFile.exists) {
+                var base64Last = encodeFileToBase64(lastResultFile);
+                if (base64Last) {
+                    userContent.push({
+                        type: "image_url",
+                        image_url: {
+                            url: "data:image/png;base64," + base64Last
+                        }
+                    });
+                    userContent[0].text += "\n[Attached Image: Input Image (Previous Result)]";
+                }
+            }
 
         } else {
             // File Mode
@@ -1204,9 +1244,22 @@ function processGeneration(settings, promptText, options, statusLabel) {
             if (settings.debugMode) {
                 var msg = "Debug Mode - Direct Mode:\n";
                 msg += "Canvas Size: " + doc.width.as("px") + "x" + doc.height.as("px") + " px\n";
-                if (base64Mask) msg += "Mask: Yes\nPath: " + maskImageFile.fsName;
-                else msg += "Mask: No";
+                if (base64Mask) msg += "Mask: Yes\nPath: " + maskImageFile.fsName + "\n";
+                else msg += "Mask: No\n";
+
+                if (options.useLastResult && lastResultFile && lastResultFile.exists) {
+                    msg += "Using Last Result: Yes\nPath: " + lastResultFile.fsName;
+                    base64Source = encodeFileToBase64(lastResultFile); // Reuse base64Source variable for simplicity in payload construction
+                } else {
+                    msg += "Using Last Result: No";
+                }
+
                 alert(msg);
+            } else {
+                // Non-debug mode logic for Last Result
+                if (options.useLastResult && lastResultFile && lastResultFile.exists) {
+                    base64Source = encodeFileToBase64(lastResultFile);
+                }
             }
 
         } else {
@@ -1227,6 +1280,10 @@ function processGeneration(settings, promptText, options, statusLabel) {
             var canvasWidth = Math.round(doc.width.as("px"));
             var canvasHeight = Math.round(doc.height.as("px"));
             parts[0].text = "Generate an image with dimensions " + canvasWidth + "x" + canvasHeight + " pixels. " + promptText;
+
+            if (options.useLastResult && base64Source) {
+                parts[0].text += "\n[Attached Image is the Input Image (Previous Result)]";
+            }
         }
 
         // Add System Prompt to identify images
