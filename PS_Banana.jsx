@@ -247,6 +247,105 @@ function saveJsonFile(fileName, data) {
     file.close();
 }
 
+function getLastGeneratedImages() {
+    var tempFolder = getTempFolder();
+    var payloadFile = new File(tempFolder.fullName + "/ps_ai_payload.json");
+
+    if (!payloadFile.exists) {
+        // Debug: check if temp folder exists
+        // alert("Temp folder: " + tempFolder.fullName + "\nPayload file: " + payloadFile.fullName + "\nExists: " + payloadFile.exists);
+        return null;
+    }
+
+    payloadFile.encoding = "UTF-8";
+    payloadFile.open("r");
+    var content = payloadFile.read();
+    payloadFile.close();
+
+    try {
+        var payload = JSON.parse(content);
+        var cached = {
+            mask: null,
+            source: null,
+            ref: null
+        };
+
+        // Extract images from payload structure
+        // 1. Gemini Structure
+        if (payload.contents && payload.contents[0] && payload.contents[0].parts) {
+            var parts = payload.contents[0].parts;
+            var imgCount = 0;
+            for (var i = 0; i < parts.length; i++) {
+                if (parts[i].inline_data) {
+                    imgCount++;
+                    var textPart = parts[0].text;
+                    if (textPart) {
+                        if (textPart.indexOf("Image " + imgCount + " is a black and white selection mask") !== -1) {
+                            cached.mask = parts[i].inline_data.data;
+                        } else if (textPart.indexOf("Image " + imgCount + " is the Source Layer") !== -1) {
+                            cached.source = parts[i].inline_data.data;
+                        } else if (textPart.indexOf("Image " + imgCount + " is the Reference Layer") !== -1) {
+                            cached.ref = parts[i].inline_data.data;
+                        }
+                    }
+                }
+            }
+        }
+        // 2. OpenAI / GPTGod Structure
+        else if (payload.messages && payload.messages[0] && payload.messages[0].content) {
+            var content = payload.messages[0].content;
+            if (content instanceof Array) {
+                var imgCount = 0;
+                // Find the text prompt first to parse descriptions
+                var textPrompt = "";
+                for (var i = 0; i < content.length; i++) {
+                    if (content[i].type === "text") {
+                        textPrompt = content[i].text;
+                        break;
+                    }
+                }
+
+                for (var i = 0; i < content.length; i++) {
+                    if (content[i].type === "image_url" && content[i].image_url && content[i].image_url.url) {
+                        imgCount++;
+                        var dataUrl = content[i].image_url.url;
+                        var base64 = "";
+                        if (dataUrl.indexOf("base64,") !== -1) {
+                            base64 = dataUrl.split("base64,")[1];
+                        } else {
+                            continue; // Skip if not base64
+                        }
+
+                        // Match image type based on the text description
+                        if (textPrompt.indexOf("[Attached Image " + imgCount + ": Mask]") !== -1) {
+                            cached.mask = base64;
+                        } else if (textPrompt.indexOf("[Attached Image " + imgCount + ": Source]") !== -1) {
+                            cached.source = base64;
+                        } else if (textPrompt.indexOf("[Attached Image " + imgCount + ": Reference]") !== -1) {
+                            cached.ref = base64;
+                        } else if (textPrompt.indexOf("[Attached Image: Input Image (Previous Result)]") !== -1) {
+                            cached.source = base64; // Direct mode input
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we found nothing, maybe it was a different payload structure?
+        // For now, return what we found.
+        if (!cached.mask && !cached.source && !cached.ref) {
+            // alert("No images found in payload. Structure: " + (payload.contents ? "Gemini" : (payload.messages ? "OpenAI" : "Unknown")));
+            return null;
+        }
+
+        return cached;
+
+    } catch (e) {
+        // alert("Error parsing payload: " + e.message);
+        return null;
+    }
+}
+
 // ============================================================================
 // Main UI
 // ============================================================================
@@ -304,8 +403,16 @@ function showDialog() {
     chkSearch.value = false;
 
     // Generate Button
-    var btnGenerate = tabGenerate.add("button", undefined, "Generate Image");
+    var grpGenButtons = tabGenerate.add("group");
+    grpGenButtons.orientation = "row";
+    var btnGenerate = grpGenButtons.add("button", undefined, "Generate Image");
     btnGenerate.preferredSize.height = 40;
+    btnGenerate.preferredSize.width = 200;
+
+    var btnRegenerate = grpGenButtons.add("button", undefined, "Regenerate");
+    btnRegenerate.preferredSize.height = 40;
+    btnRegenerate.preferredSize.width = 100;
+    btnRegenerate.helpTip = "Reuse the last generated image content with new prompt/settings.";
 
     // ========================================================================
     // Layer Mode UI
@@ -872,6 +979,14 @@ function showDialog() {
 
     // Generate Logic
     btnGenerate.onClick = function () {
+        handleGeneration(false);
+    };
+
+    btnRegenerate.onClick = function () {
+        handleGeneration(true);
+    };
+
+    function handleGeneration(isRegenerate) {
         if (txtPrompt.text === "") {
             alert("Please enter a prompt.");
             return;
@@ -887,6 +1002,7 @@ function showDialog() {
         settings.jpegQuality = parseInt(txtQuality.text) || 8;
         settings.maxSize = parseInt(txtMaxSize.text) || 1024;
         settings.autoClose = chkAutoClose.value;
+        settings.resolution = dropResolution.selection.text; // Ensure resolution is updated
 
         try {
             var generationOptions = {
@@ -894,10 +1010,22 @@ function showDialog() {
                 searchMode: chkSearch.value,
                 useLastResult: chkUseLastResult.value,
                 sourceLayers: [],
-                refLayers: []
+                refLayers: [],
+                cachedImages: null
             };
 
-            if (generationOptions.mode === "layer") {
+            if (isRegenerate) {
+                var cached = getLastGeneratedImages();
+                if (!cached) {
+                    alert("No previous generation data found (missing payload file). Please generate normally first.");
+                    return;
+                }
+                generationOptions.cachedImages = cached;
+                // Note: We trust the user that the mode is compatible or we just use the images as they are.
+                // If we want to be strict, we could check cached.mode vs generationOptions.mode
+            }
+
+            if (generationOptions.mode === "layer" && !isRegenerate) {
                 if (selectedSourceLayers.length === 0) {
                     alert("Please select at least one Source Layer.");
                     return;
@@ -915,7 +1043,7 @@ function showDialog() {
         } catch (e) {
             alert("Error: " + e.message);
         }
-    };
+    }
 
     tabs.selection = 0;
     win.show();
@@ -1023,78 +1151,86 @@ function processGeneration(settings, promptText, options, statusLabel) {
         var base64Source = null;
         var base64Ref = null;
 
-        // 1. Handle Mask
-        var savedState = doc.activeHistoryState;
-        if (hasSelection(doc)) {
-            createMaskLayer(doc);
-            updateStatus("Exporting mask...");
-            exportImage(doc, maskImageFile, settings);
-            base64Mask = encodeFileToBase64(maskImageFile);
-            doc.activeHistoryState = savedState;
-            if (maskImageFile.exists && !settings.debugMode) maskImageFile.remove();
-        }
-
-        // 2. Handle Images based on Mode
-        if (options && options.mode === "layer") {
-            // --- Layer Mode (Optimized Batch Export) ---
-            var groupsToExport = [];
-            if (options.sourceLayers.length > 0) groupsToExport.push({ name: "source", layers: options.sourceLayers, file: sourceImageFile });
-            if (options.refLayers.length > 0) groupsToExport.push({ name: "ref", layers: options.refLayers, file: refImageFile });
-
-            if (groupsToExport.length > 0) {
-                var originalRedraw = app.preferences.enableRedraw;
-                app.preferences.enableRedraw = false;
-                try {
-                    updateStatus("Exporting layer groups...");
-                    exportAllLayerGroups(doc, groupsToExport, settings);
-                } catch (e) {
-                    alert("Export Error: " + e.message);
-                } finally {
-                    app.preferences.enableRedraw = originalRedraw;
-                }
-
-                var exportedItems = [];
-                for (var i = 0; i < groupsToExport.length; i++) {
-                    if (groupsToExport[i].file.exists) exportedItems.push({ name: groupsToExport[i].name, file: groupsToExport[i].file });
-                }
-
-                var batchResults = batchConvertFiles(exportedItems, settings);
-                for (var i = 0; i < batchResults.length; i++) {
-                    var res = batchResults[i];
-                    if (res.name === "source") base64Source = res.base64;
-                    if (res.name === "ref") base64Ref = res.base64;
-                }
-                if (!settings.debugMode) {
-                    if (sourceImageFile.exists) sourceImageFile.remove();
-                    if (refImageFile.exists) refImageFile.remove();
-                }
-            }
-        } else if (options && options.mode === "direct") {
-            // Direct Mode - No input image (unless mask?)
-            // Add canvas size info to prompt
-            var canvasWidth = Math.round(doc.width.as("px"));
-            var canvasHeight = Math.round(doc.height.as("px"));
-            userContent[0].text = "Generate an image with dimensions " + canvasWidth + "x" + canvasHeight + " pixels. " + promptText;
-
-            if (options.useLastResult && lastResultFile && lastResultFile.exists) {
-                var base64Last = encodeFileToBase64(lastResultFile);
-                if (base64Last) {
-                    userContent.push({
-                        type: "image_url",
-                        image_url: {
-                            url: "data:image/png;base64," + base64Last
-                        }
-                    });
-                    userContent[0].text += "\n[Attached Image: Input Image (Previous Result)]";
-                }
-            }
-
+        // Check for Cached Images (Regenerate Mode)
+        if (options && options.cachedImages) {
+            updateStatus("Using cached images (Regenerate)...");
+            base64Mask = options.cachedImages.mask;
+            base64Source = options.cachedImages.source;
+            base64Ref = options.cachedImages.ref;
         } else {
-            // File Mode
-            updateStatus("Exporting image...");
-            exportImage(doc, sourceImageFile, settings);
-            base64Source = encodeFileToBase64(sourceImageFile);
-            if (!settings.debugMode) sourceImageFile.remove();
+            // 1. Handle Mask
+            var savedState = doc.activeHistoryState;
+            if (hasSelection(doc)) {
+                createMaskLayer(doc);
+                updateStatus("Exporting mask...");
+                exportImage(doc, maskImageFile, settings);
+                base64Mask = encodeFileToBase64(maskImageFile);
+                doc.activeHistoryState = savedState;
+                if (maskImageFile.exists && !settings.debugMode) maskImageFile.remove();
+            }
+
+            // 2. Handle Images based on Mode
+            if (options && options.mode === "layer") {
+                // --- Layer Mode (Optimized Batch Export) ---
+                var groupsToExport = [];
+                if (options.sourceLayers.length > 0) groupsToExport.push({ name: "source", layers: options.sourceLayers, file: sourceImageFile });
+                if (options.refLayers.length > 0) groupsToExport.push({ name: "ref", layers: options.refLayers, file: refImageFile });
+
+                if (groupsToExport.length > 0) {
+                    var originalRedraw = app.preferences.enableRedraw;
+                    app.preferences.enableRedraw = false;
+                    try {
+                        updateStatus("Exporting layer groups...");
+                        exportAllLayerGroups(doc, groupsToExport, settings);
+                    } catch (e) {
+                        alert("Export Error: " + e.message);
+                    } finally {
+                        app.preferences.enableRedraw = originalRedraw;
+                    }
+
+                    var exportedItems = [];
+                    for (var i = 0; i < groupsToExport.length; i++) {
+                        if (groupsToExport[i].file.exists) exportedItems.push({ name: groupsToExport[i].name, file: groupsToExport[i].file });
+                    }
+
+                    var batchResults = batchConvertFiles(exportedItems, settings);
+                    for (var i = 0; i < batchResults.length; i++) {
+                        var res = batchResults[i];
+                        if (res.name === "source") base64Source = res.base64;
+                        if (res.name === "ref") base64Ref = res.base64;
+                    }
+                    if (!settings.debugMode) {
+                        if (sourceImageFile.exists) sourceImageFile.remove();
+                        if (refImageFile.exists) refImageFile.remove();
+                    }
+                }
+            } else if (options && options.mode === "direct") {
+                // Direct Mode - No input image (unless mask?)
+                // Add canvas size info to prompt
+                var canvasWidth = Math.round(doc.width.as("px"));
+                var canvasHeight = Math.round(doc.height.as("px"));
+                userContent[0].text = "Generate an image with dimensions " + canvasWidth + "x" + canvasHeight + " pixels. " + promptText;
+
+                if (options.useLastResult && lastResultFile && lastResultFile.exists) {
+                    var base64Last = encodeFileToBase64(lastResultFile);
+                    if (base64Last) {
+                        userContent.push({
+                            type: "image_url",
+                            image_url: {
+                                url: "data:image/png;base64," + base64Last
+                            }
+                        });
+                        userContent[0].text += "\n[Attached Image: Input Image (Previous Result)]";
+                    }
+                }
+
+            } else {
+                // File Mode
+                updateStatus("Exporting image...");
+                exportImage(doc, sourceImageFile, settings);
+                base64Source = encodeFileToBase64(sourceImageFile);
+                if (!settings.debugMode) sourceImageFile.remove();
+            }
         }
 
         // Add Images to Content
@@ -1150,124 +1286,132 @@ function processGeneration(settings, promptText, options, statusLabel) {
         var base64Source = null;
         var base64Ref = null;
 
-        // 1. Handle Mask (Common for both modes if selection exists)
-        // Save history state to revert mask layer creation
-        var savedState = doc.activeHistoryState;
+        // Check for Cached Images (Regenerate Mode)
+        if (options && options.cachedImages) {
+            updateStatus("Using cached images (Regenerate)...");
+            base64Mask = options.cachedImages.mask;
+            base64Source = options.cachedImages.source;
+            base64Ref = options.cachedImages.ref;
+        } else {
+            // 1. Handle Mask (Common for both modes if selection exists)
+            // Save history state to revert mask layer creation
+            var savedState = doc.activeHistoryState;
 
-        if (hasSelection(doc)) {
-            createMaskLayer(doc);
-            updateStatus("Exporting mask...");
-            exportImage(doc, maskImageFile, settings);
-            base64Mask = encodeFileToBase64(maskImageFile);
+            if (hasSelection(doc)) {
+                createMaskLayer(doc);
+                updateStatus("Exporting mask...");
+                exportImage(doc, maskImageFile, settings);
+                base64Mask = encodeFileToBase64(maskImageFile);
 
-            // Revert to original state (removes mask layer, restores selection)
-            doc.activeHistoryState = savedState;
+                // Revert to original state (removes mask layer, restores selection)
+                doc.activeHistoryState = savedState;
 
-            // Cleanup mask if not debug
-            if (maskImageFile.exists && !settings.debugMode) maskImageFile.remove();
-        }
-
-        // 2. Handle Images based on Mode
-        if (options && options.mode === "layer") {
-            // --- Layer Mode (Optimized Batch Export) ---
-
-            var groupsToExport = [];
-
-            // Prepare Source Group
-            if (options.sourceLayers.length > 0) {
-                groupsToExport.push({ name: "source", layers: options.sourceLayers, file: sourceImageFile });
+                // Cleanup mask if not debug
+                if (maskImageFile.exists && !settings.debugMode) maskImageFile.remove();
             }
 
-            // Prepare Reference Group
-            if (options.refLayers.length > 0) {
-                groupsToExport.push({ name: "ref", layers: options.refLayers, file: refImageFile });
-            }
+            // 2. Handle Images based on Mode
+            if (options && options.mode === "layer") {
+                // --- Layer Mode (Optimized Batch Export) ---
 
-            if (groupsToExport.length > 0) {
-                // 1. Batch Export (Single Temp Doc)
-                // Disable Redraw for Speed
-                var originalRedraw = app.preferences.enableRedraw;
-                app.preferences.enableRedraw = false;
+                var groupsToExport = [];
 
-                try {
-                    updateStatus("Exporting layer groups...");
-                    exportAllLayerGroups(doc, groupsToExport, settings);
-                } catch (e) {
-                    alert("Export Error: " + e.message);
-                } finally {
-                    app.preferences.enableRedraw = originalRedraw;
+                // Prepare Source Group
+                if (options.sourceLayers.length > 0) {
+                    groupsToExport.push({ name: "source", layers: options.sourceLayers, file: sourceImageFile });
                 }
 
-                // 2. Batch Convert (Single PowerShell Call)
-                var exportedItems = [];
-                for (var i = 0; i < groupsToExport.length; i++) {
-                    if (groupsToExport[i].file.exists) {
-                        exportedItems.push({ name: groupsToExport[i].name, file: groupsToExport[i].file });
+                // Prepare Reference Group
+                if (options.refLayers.length > 0) {
+                    groupsToExport.push({ name: "ref", layers: options.refLayers, file: refImageFile });
+                }
+
+                if (groupsToExport.length > 0) {
+                    // 1. Batch Export (Single Temp Doc)
+                    // Disable Redraw for Speed
+                    var originalRedraw = app.preferences.enableRedraw;
+                    app.preferences.enableRedraw = false;
+
+                    try {
+                        updateStatus("Exporting layer groups...");
+                        exportAllLayerGroups(doc, groupsToExport, settings);
+                    } catch (e) {
+                        alert("Export Error: " + e.message);
+                    } finally {
+                        app.preferences.enableRedraw = originalRedraw;
+                    }
+
+                    // 2. Batch Convert (Single PowerShell Call)
+                    var exportedItems = [];
+                    for (var i = 0; i < groupsToExport.length; i++) {
+                        if (groupsToExport[i].file.exists) {
+                            exportedItems.push({ name: groupsToExport[i].name, file: groupsToExport[i].file });
+                        }
+                    }
+
+                    var batchResults = batchConvertFiles(exportedItems, settings);
+
+                    // 3. Map Results
+                    for (var i = 0; i < batchResults.length; i++) {
+                        var res = batchResults[i];
+                        if (res.name === "source") base64Source = res.base64;
+                        if (res.name === "ref") base64Ref = res.base64;
+                    }
+
+                    // Cleanup
+                    if (!settings.debugMode) {
+                        if (sourceImageFile.exists) sourceImageFile.remove();
+                        if (refImageFile.exists) refImageFile.remove();
                     }
                 }
 
-                var batchResults = batchConvertFiles(exportedItems, settings);
+                // Debug Alert for Layer Mode
+                if (settings.debugMode) {
+                    var msg = "Debug Mode - Layer Export:\n";
+                    msg += "Source (" + options.sourceLayers.length + "):\nPath: " + sourceImageFile.fsName + "\n";
+                    for (var i = 0; i < options.sourceLayers.length; i++) msg += "- " + options.sourceLayers[i].name + "\n";
 
-                // 3. Map Results
-                for (var i = 0; i < batchResults.length; i++) {
-                    var res = batchResults[i];
-                    if (res.name === "source") base64Source = res.base64;
-                    if (res.name === "ref") base64Ref = res.base64;
+                    if (options.refLayers.length > 0) {
+                        msg += "References (" + options.refLayers.length + "):\nPath: " + refImageFile.fsName + "\n";
+                        for (var i = 0; i < options.refLayers.length; i++) msg += "- " + options.refLayers[i].name + "\n";
+                    }
+                    if (base64Mask) msg += "Mask: Yes\nPath: " + maskImageFile.fsName;
+                    alert(msg);
                 }
 
-                // Cleanup
-                if (!settings.debugMode) {
-                    if (sourceImageFile.exists) sourceImageFile.remove();
-                    if (refImageFile.exists) refImageFile.remove();
-                }
-            }
+            } else if (options && options.mode === "direct") {
+                // --- Direct Mode ---
+                // No layer export, only prompt with canvas dimensions
+                // Mask is still supported if selection exists
 
-            // Debug Alert for Layer Mode
-            if (settings.debugMode) {
-                var msg = "Debug Mode - Layer Export:\n";
-                msg += "Source (" + options.sourceLayers.length + "):\nPath: " + sourceImageFile.fsName + "\n";
-                for (var i = 0; i < options.sourceLayers.length; i++) msg += "- " + options.sourceLayers[i].name + "\n";
+                if (settings.debugMode) {
+                    var msg = "Debug Mode - Direct Mode:\n";
+                    msg += "Canvas Size: " + doc.width.as("px") + "x" + doc.height.as("px") + " px\n";
+                    if (base64Mask) msg += "Mask: Yes\nPath: " + maskImageFile.fsName + "\n";
+                    else msg += "Mask: No\n";
 
-                if (options.refLayers.length > 0) {
-                    msg += "References (" + options.refLayers.length + "):\nPath: " + refImageFile.fsName + "\n";
-                    for (var i = 0; i < options.refLayers.length; i++) msg += "- " + options.refLayers[i].name + "\n";
-                }
-                if (base64Mask) msg += "Mask: Yes\nPath: " + maskImageFile.fsName;
-                alert(msg);
-            }
+                    if (options.useLastResult && lastResultFile && lastResultFile.exists) {
+                        msg += "Using Last Result: Yes\nPath: " + lastResultFile.fsName;
+                        base64Source = encodeFileToBase64(lastResultFile); // Reuse base64Source variable for simplicity in payload construction
+                    } else {
+                        msg += "Using Last Result: No";
+                    }
 
-        } else if (options && options.mode === "direct") {
-            // --- Direct Mode ---
-            // No layer export, only prompt with canvas dimensions
-            // Mask is still supported if selection exists
-
-            if (settings.debugMode) {
-                var msg = "Debug Mode - Direct Mode:\n";
-                msg += "Canvas Size: " + doc.width.as("px") + "x" + doc.height.as("px") + " px\n";
-                if (base64Mask) msg += "Mask: Yes\nPath: " + maskImageFile.fsName + "\n";
-                else msg += "Mask: No\n";
-
-                if (options.useLastResult && lastResultFile && lastResultFile.exists) {
-                    msg += "Using Last Result: Yes\nPath: " + lastResultFile.fsName;
-                    base64Source = encodeFileToBase64(lastResultFile); // Reuse base64Source variable for simplicity in payload construction
+                    alert(msg);
                 } else {
-                    msg += "Using Last Result: No";
+                    // Non-debug mode logic for Last Result
+                    if (options.useLastResult && lastResultFile && lastResultFile.exists) {
+                        base64Source = encodeFileToBase64(lastResultFile);
+                    }
                 }
 
-                alert(msg);
             } else {
-                // Non-debug mode logic for Last Result
-                if (options.useLastResult && lastResultFile && lastResultFile.exists) {
-                    base64Source = encodeFileToBase64(lastResultFile);
-                }
+                // --- File Mode (Default) ---
+                updateStatus("Exporting image...");
+                exportImage(doc, sourceImageFile, settings);
+                base64Source = encodeFileToBase64(sourceImageFile);
+                if (!settings.debugMode) sourceImageFile.remove();
             }
-
-        } else {
-            // --- File Mode (Default) ---
-            updateStatus("Exporting image...");
-            exportImage(doc, sourceImageFile, settings);
-            base64Source = encodeFileToBase64(sourceImageFile);
-            if (!settings.debugMode) sourceImageFile.remove();
         }
 
 
@@ -1405,11 +1549,23 @@ function processGeneration(settings, promptText, options, statusLabel) {
     payloadFile.write(JSON.stringify(payload));
     payloadFile.close();
 
-    // 4. Construct cURL Command
+    // 4. Construct cURL Command with Performance Optimizations
     var curlCmd = 'curl -X POST "' + apiUrl + '"';
+
+    // Add headers
     for (var i = 0; i < headers.length; i++) {
         curlCmd += ' -H "' + headers[i] + '"';
     }
+
+    // Performance optimizations:
+    curlCmd += ' --compressed';      // Enable gzip/deflate compression
+    curlCmd += ' --tcp-nodelay';     // Disable Nagle's algorithm for lower latency
+    curlCmd += ' --no-buffer';       // Disable output buffering
+    curlCmd += ' --keepalive-time 60'; // Keep connection alive
+    curlCmd += ' --max-time 300';    // Set 5 min timeout (prevent hanging)
+    curlCmd += ' --connect-timeout 30'; // Connection timeout 30s
+
+    // Data and output
     curlCmd += ' -d "@' + payloadFile.fsName + '"';
     curlCmd += ' -o "' + responseFile.fsName + '"';
 
