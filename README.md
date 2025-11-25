@@ -20,4 +20,5 @@ C:\Program Files\Adobe\Adobe Photoshop 2023\Presets\Scripts\
 - 支持选区
 - Prompt预设
 - 自定义API提供商(目前只在yunwu/gptgod跑通，其它没测)
+  [yunwu](https://yunwu.ai/register?aff=VE3i) | [gptgod](https://gptgod.site/#/register?invite_code=5ax35dxlk4bys0j7jnzqypwkc)
 
