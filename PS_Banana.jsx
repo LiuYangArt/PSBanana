@@ -247,9 +247,75 @@ function saveJsonFile(fileName, data) {
     file.close();
 }
 
+function getLastPrompt() {
+    // Helper function to trim whitespace (ExtendScript doesn't have String.trim())
+    function trimString(str) {
+        return str.replace(/^\s+|\s+$/g, '');
+    }
+
+    var tempFolder = getTempFolder();
+    var payloadFile = new File(tempFolder.fsName + "/ps_ai_payload.json");
+
+    if (!payloadFile.exists) return null;
+
+    payloadFile.encoding = "UTF-8";
+    payloadFile.open("r");
+    var content = payloadFile.read();
+    payloadFile.close();
+
+    try {
+        var payload = JSON.parse(content);
+
+        // 1. Gemini Structure
+        if (payload.contents && payload.contents[0] && payload.contents[0].parts) {
+            var parts = payload.contents[0].parts;
+            for (var i = 0; i < parts.length; i++) {
+                if (parts[i].text) {
+                    var text = parts[i].text;
+                    // Remove system instruction prefix if present
+                    var userPromptIdx = text.indexOf("\n\nUser Prompt: ");
+                    if (userPromptIdx !== -1) {
+                        text = text.substring(userPromptIdx + 14); // Length of "\n\nUser Prompt: "
+                    }
+                    // Remove canvas dimension prefix for Direct Mode
+                    var dimensionIdx = text.indexOf(" pixels. ");
+                    if (dimensionIdx !== -1 && text.indexOf("Generate an image with dimensions") === 0) {
+                        text = text.substring(dimensionIdx + 9);
+                    }
+                    // Remove image attachment annotations
+                    text = text.replace(/\n\[Attached Image.*?\]/g, "");
+                    return trimString(text);
+                }
+            }
+        }
+        // 2. OpenAI / GPTGod Structure
+        else if (payload.messages && payload.messages[0] && payload.messages[0].content) {
+            var content = payload.messages[0].content;
+            if (content instanceof Array) {
+                for (var i = 0; i < content.length; i++) {
+                    if (content[i].type === "text") {
+                        var text = content[i].text;
+                        // Remove canvas dimension prefix for Direct Mode
+                        var dimensionIdx = text.indexOf(" pixels. ");
+                        if (dimensionIdx !== -1 && text.indexOf("Generate an image with dimensions") === 0) {
+                            text = text.substring(dimensionIdx + 9);
+                        }
+                        // Remove image attachment annotations
+                        text = text.replace(/\n\[Attached Image.*?\]/g, "");
+                        return trimString(text);
+                    }
+                }
+            }
+        }
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
 function getLastGeneratedImages() {
     var tempFolder = getTempFolder();
-    var payloadFile = new File(tempFolder.fullName + "/ps_ai_payload.json");
+    var payloadFile = new File(tempFolder.fsName + "/ps_ai_payload.json");
 
     if (!payloadFile.exists) {
         // Debug: check if temp folder exists
@@ -413,6 +479,11 @@ function showDialog() {
     btnRegenerate.preferredSize.height = 40;
     btnRegenerate.preferredSize.width = 100;
     btnRegenerate.helpTip = "Reuse the last generated image content with new prompt/settings.";
+
+    var btnLoadPrompt = grpGenButtons.add("button", undefined, "Load Last Prompt");
+    btnLoadPrompt.preferredSize.height = 40;
+    btnLoadPrompt.preferredSize.width = 120;
+    btnLoadPrompt.helpTip = "Load the prompt from the last generation.";
 
     // ========================================================================
     // Layer Mode UI
@@ -984,6 +1055,15 @@ function showDialog() {
 
     btnRegenerate.onClick = function () {
         handleGeneration(true);
+    };
+
+    btnLoadPrompt.onClick = function () {
+        var lastPrompt = getLastPrompt();
+        if (!lastPrompt) {
+            alert("No previous prompt found (missing payload file).");
+            return;
+        }
+        txtPrompt.text = lastPrompt;
     };
 
     function handleGeneration(isRegenerate) {
