@@ -184,12 +184,12 @@ var defaultPresets = [
 ];
 
 var defaultProviders = [
-    {
-        name: "Google Gemini",
-        apiKey: "",
-        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-        model: "gemini-2.5-flash-image"
-    },
+    // {
+    //     name: "Google Gemini",
+    //     apiKey: "",
+    //     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    //     model: "gemini-2.5-flash-image"
+    // },
     {
         name: "Yunwu Gemini",
         apiKey: "",
