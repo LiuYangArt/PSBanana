@@ -10,8 +10,11 @@ C:\Program Files\Adobe\Adobe Photoshop 2023\Presets\Scripts\
 
 ## 使用
 - File>Scripts>PS_Banana  运行插件<img width="635" height="377" alt="image" src="https://github.com/user-attachments/assets/62b5ab3e-3acd-4c12-bf02-b4ba7908f67c" />
-
 - 可以给这个插件设置快捷键，以便快速使用。<img width="1269" height="740" alt="image" src="https://github.com/user-attachments/assets/c3f35c55-8f47-458e-ad64-eba64d296b7c" />
+- 在Settings页面填入API。目前只在yunwu/gptgod跑通，google 官方的API我这边没有条件测。
+  [yunwu](https://yunwu.ai/register?aff=VE3i) | [gptgod](https://gptgod.site/#/register?invite_code=5ax35dxlk4bys0j7jnzqypwkc)
+  <img width="918" height="261" alt="image" src="https://github.com/user-attachments/assets/dc16aa88-1ac6-4648-9590-ac55b9262817" />
+
 
 
 ## 功能
@@ -19,5 +22,5 @@ C:\Program Files\Adobe\Adobe Photoshop 2023\Presets\Scripts\
 - Direct Mode 文生图， 勾选使用上次结果可以把上次生成的图作为context<img width="875" height="635" alt="image" src="https://github.com/user-attachments/assets/a5c55269-76a4-461c-ba15-28c34f22a5e8" />
 - 支持选区
 - Prompt预设
-- 自定义API提供商(目前只在yunwu/gptgod跑通，其它没测)
+- 自定义API提供商(目前只在yunwu/gptgod跑通，其它没测过)
 
