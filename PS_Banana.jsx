@@ -1615,9 +1615,9 @@ function processGeneration(settings, promptText, options, statusLabel) {
         // Google Gemini Native
         if (!payload.generationConfig) payload.generationConfig = {};
         payload.generationConfig.responseModalities = ["image"];
-        payload.generationConfig.image_config = {
-            aspect_ratio: aspectRatioStr,
-            image_size: settings.resolution
+        payload.generationConfig.imageConfig = {
+            aspectRatio: aspectRatioStr,
+            imageSize: settings.resolution
         };
 
         // Final Payload Structure Check
