@@ -27,3 +27,4 @@ C:\Program Files\Adobe\Adobe Photoshop 2023\Presets\Scripts\
 
 ## 已知问题
 - jsx脚本插件会阻塞ps进程。运行时不能操作其它界面。这是jsx本身的限制。
+- 暂时不支持官方api和openrouter的api， 目前没条件测试。 
