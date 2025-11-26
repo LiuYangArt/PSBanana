@@ -2,6 +2,7 @@
 
 - Photoshop jsx 格式插件
 - 用gemini nano banana api 在photoshop中生成图片
+- 需自行购买第三方api
 
 ## 安装
 
