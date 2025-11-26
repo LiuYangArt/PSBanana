@@ -1327,9 +1327,7 @@ function processGeneration(settings, promptText, options, statusLabel) {
             userContent.push({
                 type: "image_url",
                 image_url: {
-                    image_url: {
-                        url: "data:" + mimeType + ";base64," + base64Mask
-                    }
+                    url: "data:" + mimeType + ";base64," + base64Mask
                 }
             });
             userContent[0].text += "\n[Attached Image 1: Mask]";
@@ -1338,9 +1336,7 @@ function processGeneration(settings, promptText, options, statusLabel) {
             userContent.push({
                 type: "image_url",
                 image_url: {
-                    image_url: {
-                        url: "data:" + mimeType + ";base64," + base64Source
-                    }
+                    url: "data:" + mimeType + ";base64," + base64Source
                 }
             });
             userContent[0].text += "\n[Attached Image " + (base64Mask ? "2" : "1") + ": Source]";
@@ -1349,9 +1345,7 @@ function processGeneration(settings, promptText, options, statusLabel) {
             userContent.push({
                 type: "image_url",
                 image_url: {
-                    image_url: {
-                        url: "data:" + mimeType + ";base64," + base64Ref
-                    }
+                    url: "data:" + mimeType + ";base64," + base64Ref
                 }
             });
             userContent[0].text += "\n[Attached Image " + (base64Mask ? (base64Source ? "3" : "2") : (base64Source ? "2" : "1")) + ": Reference]";
