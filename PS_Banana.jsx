@@ -1216,6 +1216,12 @@ function processGeneration(settings, promptText, options, statusLabel) {
         apiUrl = settings.baseUrl;
         headers.push("Authorization: Bearer " + settings.apiKey);
 
+        // Check if using default GPTGod configuration for auto-model switching
+        var isDefaultGptGod = (
+            settings.baseUrl.indexOf("gptgod.online") !== -1 &&
+            settings.model === "gemini-3-pro-image-preview"
+        );
+
         // Prepare Images for Vision Model
         var messages = [];
         var userContent = [];
@@ -1351,8 +1357,19 @@ function processGeneration(settings, promptText, options, statusLabel) {
             userContent[0].text += "\n[Attached Image " + (base64Mask ? (base64Source ? "3" : "2") : (base64Source ? "2" : "1")) + ": Reference]";
         }
 
+        // Auto-adjust model based on resolution for GPTGod
+        var actualModel = settings.model;
+        if (isDefaultGptGod && settings.resolution) {
+            if (settings.resolution === "2K") {
+                actualModel = "gemini-3-pro-image-preview-2k";
+            } else if (settings.resolution === "4K") {
+                actualModel = "gemini-3-pro-image-preview-4k";
+            }
+            // 1K or other cases keep the default model
+        }
+
         payload = {
-            model: settings.model,
+            model: actualModel,
             messages: [
                 {
                     role: "user",
