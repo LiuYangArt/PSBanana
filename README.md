@@ -25,3 +25,5 @@ C:\Program Files\Adobe\Adobe Photoshop 2023\Presets\Scripts\
 - Prompt预设
 - 自定义API提供商(目前只在yunwu/gptgod跑通，其它没测过)
 
+## 已知问题
+- jsx脚本插件会阻塞ps进程。运行时不能操作其它界面。这是jsx本身的限制。
