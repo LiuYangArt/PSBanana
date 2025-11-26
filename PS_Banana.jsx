@@ -171,8 +171,8 @@ var defaultSettings = {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     model: "gemini-2.5-flash-image",
     debugMode: false,
-    useJpeg: true,
-    jpegQuality: 8,
+    useWebP: true,
+    webpQuality: 80,
     maxSize: 1024,
     resolution: "1K",
     autoClose: false
@@ -794,16 +794,14 @@ function showDialog() {
     var chkAutoClose = tabSettings.add("checkbox", undefined, "Auto Close Window After Generation");
     chkAutoClose.value = settings.autoClose === true;
 
-    // JPEG Compression
-    var grpJpeg = tabSettings.add("group");
-    grpJpeg.orientation = "row";
-    var chkJpeg = grpJpeg.add("checkbox", undefined, "Use JPEG Compression (Faster, No Alpha)");
-    chkJpeg.value = settings.useJpeg === true;
+    // WebP Settings
+    var chkWebP = tabSettings.add("checkbox", undefined, "Use WebP Format (Recommended)");
+    chkWebP.value = settings.useWebP !== false; // Default to true if undefined
 
     var grpQuality = tabSettings.add("group");
     grpQuality.orientation = "row";
-    grpQuality.add("statictext", undefined, "JPEG Quality (0-12):");
-    var txtQuality = grpQuality.add("edittext", undefined, settings.jpegQuality || 8);
+    grpQuality.add("statictext", undefined, "WebP Quality (0-100):");
+    var txtQuality = grpQuality.add("edittext", undefined, settings.webpQuality || 80);
     txtQuality.preferredSize.width = 50;
 
     // Max Size (Input)
@@ -824,9 +822,9 @@ function showDialog() {
 
     // Toggle Quality input visibility based on Checkbox
     var updateQualityVisibility = function () {
-        grpQuality.visible = chkJpeg.value;
+        grpQuality.visible = chkWebP.value;
     };
-    chkJpeg.onClick = updateQualityVisibility;
+    chkWebP.onClick = updateQualityVisibility;
     updateQualityVisibility();
 
     var btnSaveSettings = tabSettings.add("button", undefined, "Save Settings");
@@ -1035,8 +1033,8 @@ function showDialog() {
         settings.baseUrl = txtBaseUrl.text;
         settings.model = txtModel.text;
         settings.debugMode = chkDebug.value;
-        settings.useJpeg = chkJpeg.value;
-        settings.jpegQuality = parseInt(txtQuality.text) || 8;
+        settings.useWebP = chkWebP.value;
+        settings.webpQuality = parseInt(txtQuality.text) || 80;
         settings.maxSize = parseInt(txtMaxSize.text) || 1024;
         settings.resolution = dropResolution.selection.text;
         settings.autoClose = chkAutoClose.value;
@@ -1078,8 +1076,8 @@ function showDialog() {
         settings.baseUrl = txtBaseUrl.text;
         settings.model = txtModel.text;
         settings.debugMode = chkDebug.value;
-        settings.useJpeg = chkJpeg.value;
-        settings.jpegQuality = parseInt(txtQuality.text) || 8;
+        settings.useWebP = chkWebP.value;
+        settings.webpQuality = parseInt(txtQuality.text) || 80;
         settings.maxSize = parseInt(txtMaxSize.text) || 1024;
         settings.autoClose = chkAutoClose.value;
         settings.resolution = dropResolution.selection.text; // Ensure resolution is updated
@@ -1202,8 +1200,8 @@ function processGeneration(settings, promptText, options, statusLabel) {
     var resultImageFile = new File(tempFolder.fsName + "/ps_ai_result_" + timestamp + ".png");
 
     // Determine extension and mime type based on settings
-    var ext = settings.useJpeg ? ".jpg" : ".png";
-    var mimeType = settings.useJpeg ? "image/jpeg" : "image/png";
+    var ext = settings.useWebP ? ".webp" : ".png";
+    var mimeType = settings.useWebP ? "image/webp" : "image/png";
 
     // 2. Construct Payload based on Provider
     var payload = {};
@@ -1323,7 +1321,9 @@ function processGeneration(settings, promptText, options, statusLabel) {
             userContent.push({
                 type: "image_url",
                 image_url: {
-                    url: "data:image/jpeg;base64," + base64Mask
+                    image_url: {
+                        url: "data:" + mimeType + ";base64," + base64Mask
+                    }
                 }
             });
             userContent[0].text += "\n[Attached Image 1: Mask]";
@@ -1332,7 +1332,9 @@ function processGeneration(settings, promptText, options, statusLabel) {
             userContent.push({
                 type: "image_url",
                 image_url: {
-                    url: "data:image/jpeg;base64," + base64Source
+                    image_url: {
+                        url: "data:" + mimeType + ";base64," + base64Source
+                    }
                 }
             });
             userContent[0].text += "\n[Attached Image " + (base64Mask ? "2" : "1") + ": Source]";
@@ -1341,7 +1343,9 @@ function processGeneration(settings, promptText, options, statusLabel) {
             userContent.push({
                 type: "image_url",
                 image_url: {
-                    url: "data:image/jpeg;base64," + base64Ref
+                    image_url: {
+                        url: "data:" + mimeType + ";base64," + base64Ref
+                    }
                 }
             });
             userContent[0].text += "\n[Attached Image " + (base64Mask ? (base64Source ? "3" : "2") : (base64Source ? "2" : "1")) + ": Reference]";
@@ -2060,7 +2064,7 @@ function hasSelection(doc) {
 // DEPRECATED: Use exportImage instead
 function exportCurrentStateToPng(file) {
     // Redirect to new function with default settings (PNG)
-    exportImage(app.activeDocument, file, { useJpeg: false });
+    exportImage(app.activeDocument, file, { useWebP: false });
 }
 
 function testApiConnection(settings) {
@@ -2296,11 +2300,31 @@ function expandLayerSet(layerSet) {
 }
 
 function saveImage(doc, file, settings) {
-    if (settings && settings.useJpeg) {
-        saveJpeg(doc, file, settings.jpegQuality);
+    if (settings && settings.useWebP) {
+        saveWebP(doc, file, settings.webpQuality);
     } else {
         savePng(doc, file);
     }
+}
+
+function saveWebP(doc, file, quality) {
+    var actionDescriptor = new ActionDescriptor();
+    var actionDescriptor2 = new ActionDescriptor();
+
+    // WebP Format Options
+    actionDescriptor2.putEnumerated(stringIDToTypeID("compression"), stringIDToTypeID("WebPCompression"), stringIDToTypeID("compressionLossy"));
+    actionDescriptor2.putInteger(stringIDToTypeID("quality"), quality); // 0-100
+    actionDescriptor2.putBoolean(stringIDToTypeID("includeXMPData"), false);
+    actionDescriptor2.putBoolean(stringIDToTypeID("includeEXIFData"), false);
+    actionDescriptor2.putBoolean(stringIDToTypeID("includePsExtras"), false);
+
+    // Save Action
+    actionDescriptor.putObject(stringIDToTypeID("as"), stringIDToTypeID("WebPFormat"), actionDescriptor2);
+    actionDescriptor.putPath(stringIDToTypeID("in"), file);
+    actionDescriptor.putBoolean(stringIDToTypeID("copy"), true);
+    actionDescriptor.putBoolean(stringIDToTypeID("lowerCase"), true);
+
+    executeAction(stringIDToTypeID("save"), actionDescriptor, DialogModes.NO);
 }
 
 function savePng(doc, file) {
@@ -2309,13 +2333,7 @@ function savePng(doc, file) {
     doc.saveAs(file, opts, true, Extension.LOWERCASE);
 }
 
-function saveJpeg(doc, file, quality) {
-    var opts = new JPEGSaveOptions();
-    opts.quality = quality || 8;
-    opts.formatOptions = FormatOptions.STANDARDBASELINE;
-    opts.matte = MatteType.WHITE; // Flatten transparency to white
-    doc.saveAs(file, opts, true, Extension.LOWERCASE);
-}
+
 
 // Replaces exportCurrentStateToPng
 function exportImage(doc, file, settings) {
