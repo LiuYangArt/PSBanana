@@ -421,7 +421,7 @@ function showDialog() {
     var presets = loadJsonFile(PRESETS_FILE_NAME, defaultPresets);
     var providers = loadJsonFile(PROVIDERS_FILE_NAME, defaultProviders);
 
-    var win = new Window("dialog", "Photoshop Banana v1.0 by LiuYang");
+    var win = new Window("dialog", "Photoshop Banana v1.1 by LiuYang");
     win.orientation = "column";
     win.alignChildren = ["fill", "top"];
     win.spacing = 10;
