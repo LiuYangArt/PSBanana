@@ -28,3 +28,49 @@ C:\Program Files\Adobe\Adobe Photoshop 2023\Presets\Scripts\
 ## 已知问题
 - jsx脚本插件会阻塞ps进程。运行时不能操作其它界面。这是jsx本身的限制。
 - 暂时不支持官方api和openrouter的api， 目前没条件测试。 
+
+
+---
+
+# Photoshop Banana
+
+- Photoshop JSX format plugin
+- Generates images in Photoshop using the Gemini Nano Banana API
+- Requires you to purchase a third-party API
+
+## Installation
+
+Copy `PS_Banana.jsx` to Photoshop's scripts folder, for example:
+C:\Program Files\Adobe\Adobe Photoshop 2023\Presets\Scripts\
+
+## Usage
+
+- File > Scripts > PS_Banana to run the plugin  
+  ![image](https://github.com/user-attachments/assets/62b5ab3e-3acd-4c12-bf02-b4ba7908f67c)
+  
+- You can set a shortcut key for this plugin for quicker access.  
+  ![image](https://github.com/user-attachments/assets/c3f35c55-8f47-458e-ad64-eba64d296b7c)
+
+- Fill in the API in the Settings page. Currently, it works with yunwu/gptgod, and I haven't tested Google's official API.  
+  [yunwu](https://yunwu.ai/register?aff=VE3i) | [gptgod](https://gptgod.site/#/register?invite_code=5ax35dxlk4bys0j7jnzqypwkc)  
+  ![image](https://github.com/user-attachments/assets/dc16aa88-1ac6-4648-9590-ac55b9262817)
+
+## Features
+
+- Supports layer mode. Use source/reference to name layer groups to achieve similar effects as sending two images in a chat.  
+  ![image](https://github.com/user-attachments/assets/1d6967e0-b56e-4533-a017-0f448d099a4f)  
+  ![image](https://github.com/user-attachments/assets/41e8bb66-0cf2-4a25-9d71-33a71c1aecf8)
+
+- Direct Mode for generating images. Check "Use last result" to use the previously generated image as context.  
+  ![image](https://github.com/user-attachments/assets/a5c55269-76a4-461c-ba15-28c34f22a5e8)
+
+- Supports selection areas
+- Prompt presets
+- Custom API providers (currently only works with yunwu/gptgod, untested with others)
+
+## Known Issues
+
+- The JSX script plugin blocks the PS process. You cannot operate other interfaces while it's running. This is a limitation of JSX itself.
+- Official APIs and OpenRouter APIs are currently unsupported, as I don't have the conditions to test them.
+
+---
