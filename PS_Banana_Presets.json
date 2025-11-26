@@ -50,11 +50,6 @@
         "mode": "layer"
     },
     {
-        "name": "转线稿 (Marko Djurdjevic)",
-        "prompt": "把这张图变成精致的线稿， six more vodka 的 Marko Djurdjevic 风格。 ",
-        "mode": "file"
-    },
-    {
         "name": "转线稿 (村田雄介)",
         "prompt": "将这张照片变成精致的日本漫画风格，村田雄介的画风",
         "mode": "file"
