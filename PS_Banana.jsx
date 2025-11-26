@@ -1164,6 +1164,11 @@ function processGeneration(settings, promptText, options, statusLabel) {
     // BUT if useLastResult is true, we need to find the LATEST one first
     var lastResultFile = null;
     var oldResults = tempFolder.getFiles("ps_ai_result_*.png");
+    var oldResultsWebP = tempFolder.getFiles("ps_ai_result_*.webp");
+    if (oldResultsWebP && oldResultsWebP.length > 0) {
+        if (!oldResults) oldResults = [];
+        for (var i = 0; i < oldResultsWebP.length; i++) oldResults.push(oldResultsWebP[i]);
+    }
 
     if (options && options.useLastResult && options.mode === "direct") {
         // Find the latest file
@@ -1814,6 +1819,23 @@ function processGeneration(settings, promptText, options, statusLabel) {
         }
     }
 
+    // 8.5 Check for WebP Mismatch (GodGPT issue: returns WebP but URL/Name says PNG)
+    if (resultImageFile.exists) {
+        if (isWebP(resultImageFile)) {
+            // It is actually a WebP file
+            if (resultImageFile.name.toLowerCase().indexOf(".webp") === -1) {
+                // Rename to .webp
+                var newName = resultImageFile.name.replace(/\.[^\.]+$/, ".webp");
+                var newFile = new File(resultImageFile.path + "/" + newName);
+                if (newFile.exists) newFile.remove();
+                if (resultImageFile.rename(newName)) {
+                    resultImageFile = newFile;
+                    if (settings.debugMode) alert("Detected WebP signature. Renamed to: " + resultImageFile.name);
+                }
+            }
+        }
+    }
+
     // 9. Import to Photoshop
     if (resultImageFile.exists) {
         if (resultImageFile.length > 0) {
@@ -2406,23 +2428,55 @@ function createSourceRefGroups(doc) {
         }
     }
 
-    // Create Source if missing
+    // Create if missing
     if (!sourceGroup) {
         sourceGroup = doc.layerSets.add();
         sourceGroup.name = "source";
-        // Move to top? Or just leave where created (usually top)
+        setLayerColor(sourceGroup, "Green");
     }
-    // Set Color to Green
-    setLayerColor(sourceGroup, "Green");
 
-    // Create Reference if missing
     if (!refGroup) {
         refGroup = doc.layerSets.add();
         refGroup.name = "reference";
+        setLayerColor(refGroup, "Violet");
     }
-    // Set Color to Violet
-    setLayerColor(refGroup, "Violet");
 }
+
+// Helper: Check if file is WebP by reading signature
+function isWebP(file) {
+    if (!file.exists) return false;
+
+    try {
+        file.encoding = "BINARY";
+        file.open("r");
+        var header = file.read(12); // Read first 12 bytes
+        file.close();
+
+        if (!header || header.length < 12) return false;
+
+        // RIFF....WEBP
+        // Bytes 0-3: "RIFF"
+        // Bytes 8-11: "WEBP"
+
+        // Check "RIFF"
+        if (header.charCodeAt(0) === 82 && // R
+            header.charCodeAt(1) === 73 && // I
+            header.charCodeAt(2) === 70 && // F
+            header.charCodeAt(3) === 70 && // F
+
+            // Check "WEBP"
+            header.charCodeAt(8) === 87 && // W
+            header.charCodeAt(9) === 69 && // E
+            header.charCodeAt(10) === 66 && // B
+            header.charCodeAt(11) === 80) { // P
+            return true;
+        }
+    } catch (e) {
+        // Ignore read errors
+    }
+    return false;
+}
+
 
 function setLayerColor(layer, colorName) {
     try {
