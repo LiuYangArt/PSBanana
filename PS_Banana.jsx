@@ -485,6 +485,13 @@ function showDialog() {
     btnLoadPrompt.preferredSize.width = 120;
     btnLoadPrompt.helpTip = "Load the prompt from the last generation.";
 
+    // Resolution (Output) - Moved from Settings
+    var grpRes = tabGenerate.add("group");
+    grpRes.orientation = "row";
+    grpRes.add("statictext", undefined, "Output Resolution:");
+    var dropResolution = grpRes.add("dropdownlist", undefined, ["1K", "2K", "4K"]);
+    dropResolution.selection = (settings.resolution === "2K") ? 1 : ((settings.resolution === "4K") ? 2 : 0);
+
     // ========================================================================
     // Layer Mode UI
     // ========================================================================
@@ -813,11 +820,7 @@ function showDialog() {
     grpSize.add("statictext", undefined, "(Images for AI to process)");
 
     // Resolution (Output)
-    var grpRes = tabSettings.add("group");
-    grpRes.orientation = "row";
-    grpRes.add("statictext", undefined, "Output Resolution:");
-    var dropResolution = grpRes.add("dropdownlist", undefined, ["1K", "2K", "4K"]);
-    dropResolution.selection = (settings.resolution === "2K") ? 1 : ((settings.resolution === "4K") ? 2 : 0);
+
 
 
     // Toggle Quality input visibility based on Checkbox
@@ -1043,6 +1046,11 @@ function showDialog() {
     };
 
     btnClose.onClick = function () {
+        // Save resolution setting on close
+        if (dropResolution.selection) {
+            settings.resolution = dropResolution.selection.text;
+            saveJsonFile(SETTINGS_FILE_NAME, settings);
+        }
         win.close();
     };
 
