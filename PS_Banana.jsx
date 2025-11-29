@@ -166,10 +166,10 @@ var PRESETS_FILE_NAME = "PS_Banana_Presets.json";
 var PROVIDERS_FILE_NAME = "PS_Banana_Providers.json";
 
 var defaultSettings = {
-    provider: "Google Gemini",
+    provider: "Yunwu Gemini",
     apiKey: "",
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-    model: "gemini-2.5-flash-image",
+    baseUrl: "https://yunwu.zeabur.app/v1beta",
+    model: "gemini-3-pro-image-preview",
     debugMode: false,
     useWebP: true,
     webpQuality: 80,
@@ -465,8 +465,7 @@ function showDialog() {
     txtPrompt.preferredSize.height = 150;
 
     // Search Web Toggle
-    var chkSearch = tabGenerate.add("checkbox", undefined, "Search Web (Grounding)");
-    chkSearch.value = false;
+
 
     // Generate Button
     var grpGenButtons = tabGenerate.add("group");
@@ -491,6 +490,10 @@ function showDialog() {
     grpRes.add("statictext", undefined, "Output Resolution:");
     var dropResolution = grpRes.add("dropdownlist", undefined, ["1K", "2K", "4K"]);
     dropResolution.selection = (settings.resolution === "2K") ? 1 : ((settings.resolution === "4K") ? 2 : 0);
+
+    // Search Web Toggle (Moved here)
+    var chkSearch = grpRes.add("checkbox", undefined, "Search Web (Grounding)");
+    chkSearch.value = false;
 
     // ========================================================================
     // Layer Mode UI
@@ -1219,7 +1222,7 @@ function processGeneration(settings, promptText, options, statusLabel) {
     ];
 
 
-    if (settings.provider === "GPTGod NanoBanana Pro" || settings.baseUrl.indexOf("gptgod") !== -1) {
+    if (settings.provider === "GPTGod NanoBanana Pro" || settings.baseUrl.indexOf("gptgod") !== -1 || settings.provider === "OpenRouter" || settings.baseUrl.indexOf("openrouter") !== -1 || settings.baseUrl.indexOf("/chat/completions") !== -1) {
         // GPT God (OpenAI Compatible but returns URL)
         apiUrl = settings.baseUrl;
         headers.push("Authorization: Bearer " + settings.apiKey);
@@ -1369,6 +1372,38 @@ function processGeneration(settings, promptText, options, statusLabel) {
             }
             // 1K or other cases keep the default model
         }
+
+        // --- Smart Aspect Ratio Logic (for OpenAI/GPTGod) ---
+        // Calculate Aspect Ratio
+        var width = doc.width.as("px");
+        var height = doc.height.as("px");
+        var currentRatio = width / height;
+        var ratios = [
+            { name: "1:1", value: 1.0 },
+            { name: "16:9", value: 16 / 9 },
+            { name: "9:16", value: 9 / 16 },
+            { name: "4:3", value: 4 / 3 },
+            { name: "3:4", value: 3 / 4 },
+            { name: "3:2", value: 3 / 2 },
+            { name: "2:3", value: 2 / 3 },
+            { name: "5:4", value: 5 / 4 },
+            { name: "4:5", value: 4 / 5 },
+            { name: "21:9", value: 21 / 9 }
+        ];
+        var bestRatio = ratios[0];
+        var minDiff = Math.abs(currentRatio - bestRatio.value);
+        for (var r = 1; r < ratios.length; r++) {
+            var diff = Math.abs(currentRatio - ratios[r].value);
+            if (diff < minDiff) {
+                minDiff = diff;
+                bestRatio = ratios[r];
+            }
+        }
+        var aspectRatioStr = bestRatio.name;
+
+        // Append to prompt
+        userContent[0].text += "\nAspect Ratio: " + aspectRatioStr;
+
 
         payload = {
             model: actualModel,
