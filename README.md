@@ -4,6 +4,9 @@
 - 用gemini nano banana api 在photoshop中生成图片
 - 需自行购买第三方api
 
+  ![generated_image_20251129224118](https://github.com/user-attachments/assets/34b02b7d-9588-4d95-97a6-a262f1e3f80b)
+
+
 ## 安装
 
 将PS_Banana.jsx复制到ps的scripts文件夹下，例如：
