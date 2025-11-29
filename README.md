@@ -15,8 +15,6 @@ C:\Program Files\Adobe\Adobe Photoshop 2023\Presets\Scripts\
 - 在Settings页面填入API。目前只在yunwu/gptgod跑通，google 官方的API我这边没有条件测。
   [yunwu](https://yunwu.ai/register?aff=VE3i) | [gptgod](https://gptgod.site/#/register?invite_code=5ax35dxlk4bys0j7jnzqypwkc)
   <img width="918" height="261" alt="image" src="https://github.com/user-attachments/assets/dc16aa88-1ac6-4648-9590-ac55b9262817" />
-  使用yunwu api时需确认启用了gemini api
-  <img width="651" height="150" alt="image" src="https://github.com/user-attachments/assets/145b1693-c7b0-4f74-ba4c-87584802f986" />
 
 
 
