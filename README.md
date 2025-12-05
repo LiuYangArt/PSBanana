@@ -1,5 +1,5 @@
-此版本已不维护，新版： [https://github.com/LiuYangArt/PSBananaUXP](https://github.com/LiuYangArt/PSBananaUXP)
-this plugin is deprecated.
+- 此版本已不维护，新版： [https://github.com/LiuYangArt/PSBananaUXP](https://github.com/LiuYangArt/PSBananaUXP)
+- this plugin is deprecated.
 
 # Photoshop Banana
 
