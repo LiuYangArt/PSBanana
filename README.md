@@ -1,3 +1,6 @@
+此版本已不维护，新版： [https://github.com/LiuYangArt/PSBananaUXP](https://github.com/LiuYangArt/PSBananaUXP)
+this plugin is deprecated.
+
 # Photoshop Banana
 
 - Photoshop jsx 格式插件
